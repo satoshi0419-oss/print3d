@@ -46,6 +46,7 @@ h1{font-size:22px} h2{font-size:18px}
 .small{font-size:12px;color:var(--muted);margin:0}
 .err{color:var(--warn);font-size:13px;margin:0}
 .roomlist{display:flex;flex-direction:column;gap:8px}
+.pwbox{display:flex;flex-direction:column;gap:10px;border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--bg)}
 .roomrow{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
 .roomrow .code{font-family:var(--display);font-size:20px;letter-spacing:.2em}
 .roomrow .meta{font-size:12px;color:var(--muted)}
@@ -133,15 +134,22 @@ section{display:flex;flex-direction:column;gap:8px}
     <div class="field"><label for="email">メールアドレス</label><input id="email" type="email" autocomplete="username"></div>
     <div class="field"><label for="pw">パスワード（8文字以上）</label><input id="pw" type="password" autocomplete="current-password"></div>
     <p class="err" id="authErr" hidden></p>
-    <div class="btn-row"><button class="btn primary" id="btnLogin">ログイン</button><button class="btn" id="btnSignup">新しく登録</button></div>
+    <button class="btn primary" id="btnLogin">ログイン</button>
+    <p class="small">アカウントは管理者が発行します。お持ちでない場合は管理者にご連絡ください。</p>
     <button class="link" id="goHome">生徒の入口に戻る</button>
   </div>
   <div class="card wide" id="roomsCard" hidden>
-    <div class="topbar"><span id="whoami" class="small"></span><div class="row"><button class="link" id="goHome2">生徒の入口</button><button class="link" id="btnLogout">ログアウト</button></div></div>
+    <div class="topbar"><span id="whoami" class="small"></span><div class="row"><button class="link" id="goHome2">生徒の入口</button><button class="link" id="btnPwOpen">パスワード変更</button><button class="link" id="btnLogout">ログアウト</button></div></div>
+    <div class="pwbox" id="pwBox" hidden>
+      <div class="field"><label for="pwNew">新しいパスワード（8文字以上）</label><input id="pwNew" type="password" autocomplete="new-password"></div>
+      <div class="field"><label for="pwNew2">もう一度</label><input id="pwNew2" type="password" autocomplete="new-password"></div>
+      <p class="err" id="pwErr" hidden></p>
+      <div class="btn-row"><button class="btn primary" id="btnPwSave">変更する</button><button class="btn" id="btnPwCancel">やめる</button></div>
+    </div>
     <h2>部屋をつくる</h2>
     <div class="row"><input id="newRoomName" type="text" placeholder="例: 6年1組 校舎" maxlength="40"><button class="btn primary" id="btnCreateRoom">つくる</button></div>
     <p class="small">1つの部屋＝1つの作品です。クラス全員で1つの校舎を作るなら部屋は1つで足ります。</p>
-    <h2>じぶんの部屋</h2>
+    <h2 id="roomsHeading">じぶんの部屋</h2>
     <div class="roomlist" id="roomList"></div>
   </div>
 </div>
@@ -260,6 +268,7 @@ const S = {
   room:null,          // {id, name, code?, max_colors, mm_per_block, m_per_block, locked}
   nick:"",            // ニックネーム
   isTeacher:false,
+  teacher:null,       // {display_name, is_admin, school_id, schools:{name}}
   myId: Math.random().toString(36).slice(2,10),  // 同じ部屋の中で自分を区別するだけの仮ID
   channel:null,
   settings:{maxColors:3, mm:5, m:1, locked:false},
@@ -301,19 +310,36 @@ async function refreshAuth(){
   if(!sb){ $("authErr").textContent="接続設定（config.js）が空のため先生機能は使えません。"; $("authErr").hidden=false; return; }
   const {data:{session}} = await sb.auth.getSession();
   $("authCard").hidden = !!session; $("roomsCard").hidden = !session;
-  if(session){ $("whoami").textContent = session.user.email; await listRooms(); }
+  if(session){
+    // 先生の名前・学校（teachers テーブル）。未登録なら null → メールアドレスで表示
+    const {data:me} = await sb.from("teachers").select("display_name, is_admin, school_id, schools(name)").eq("user_id", session.user.id).maybeSingle();
+    S.teacher = me || null;
+    $("whoami").textContent = me ? `${me.display_name}（${me.schools?.name || "学校未設定"}）${me.is_admin?" ・管理者":""}` : `${session.user.email}（学校未登録）`;
+    $("roomsHeading").textContent = me?.is_admin ? "すべての学校の部屋" : me?.schools ? `${me.schools.name}の部屋` : "じぶんの部屋";
+    await listRooms();
+  }
 }
-async function authAction(kind){
+async function login(){
   const email=$("email").value.trim(), password=$("pw").value;
   const err=$("authErr"); err.hidden=true;
-  if(!email || password.length<8){ err.textContent="メールアドレスと8文字以上のパスワードを入れてください"; err.hidden=false; return; }
-  const r = kind==="login" ? await sb.auth.signInWithPassword({email,password}) : await sb.auth.signUp({email,password});
-  if(r.error){ err.textContent = r.error.message; err.hidden=false; return; }
-  if(kind==="signup" && !r.data.session){ err.textContent="確認メールを送りました。メール内のリンクを開いてからログインしてください。"; err.hidden=false; return; }
-  refreshAuth();
+  if(!email || !password){ err.textContent="メールアドレスとパスワードを入れてください"; err.hidden=false; return; }
+  const r = await sb.auth.signInWithPassword({email,password});
+  if(r.error){ err.textContent = /invalid/i.test(r.error.message) ? "メールアドレスかパスワードが違います" : r.error.message; err.hidden=false; return; }
+  $("pw").value=""; refreshAuth();
 }
-$("btnLogin").addEventListener("click", () => authAction("login"));
-$("btnSignup").addEventListener("click", () => authAction("signup"));
+$("btnLogin").addEventListener("click", login);
+$("pw").addEventListener("keydown", e => { if(e.key==="Enter") login(); });
+// パスワード変更（ログイン中の本人のパスワードを Supabase Auth で書き換える）
+$("btnPwOpen").addEventListener("click", () => { $("pwBox").hidden = false; $("pwNew").focus(); });
+$("btnPwCancel").addEventListener("click", () => { $("pwBox").hidden = true; $("pwNew").value = $("pwNew2").value = ""; $("pwErr").hidden = true; });
+$("btnPwSave").addEventListener("click", async () => {
+  const a=$("pwNew").value, b=$("pwNew2").value, err=$("pwErr"); err.hidden=true;
+  if(a.length<8){ err.textContent="8文字以上にしてください"; err.hidden=false; return; }
+  if(a!==b){ err.textContent="2つの入力が一致しません"; err.hidden=false; return; }
+  const {error} = await sb.auth.updateUser({password:a});
+  if(error){ err.textContent = /different from the old/i.test(error.message) ? "今と同じパスワードは使えません" : error.message; err.hidden=false; return; }
+  $("btnPwCancel").click(); toast("パスワードを変更しました");
+});
 $("btnLogout").addEventListener("click", async () => { await sb.auth.signOut(); refreshAuth(); });
 
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 0/O, 1/I は見間違えるので除外
@@ -322,22 +348,26 @@ $("btnCreateRoom").addEventListener("click", async () => {
   const name = $("newRoomName").value.trim() || "校舎";
   const {data:{user}} = await sb.auth.getUser();
   for(let attempt=0; attempt<5; attempt++){
-    const {error} = await sb.from("rooms").insert({code:genCode(), name, owner_id:user.id});
+    const {error} = await sb.from("rooms").insert({code:genCode(), name, owner_id:user.id, school_id:S.teacher?.school_id ?? null});
     if(!error){ $("newRoomName").value=""; await listRooms(); return; }
     if(error.code!=="23505"){ toast("部屋を作れませんでした: "+error.message); return; } // 23505 = unique violation（コードがかぶった）
   }
 });
 async function listRooms(){
-  const {data, error} = await sb.from("rooms").select("*").order("created_at",{ascending:false});
+  const {data, error} = await sb.from("rooms").select("*, schools(name)").order("created_at",{ascending:false});
   const list = $("roomList"); list.innerHTML="";
   if(error){ list.textContent = error.message; return; }
+  const {data:tlist} = await sb.from("teachers").select("user_id, display_name");
+  const names = new Map((tlist||[]).map(t=>[t.user_id, t.display_name]));
   if(!data.length){ list.innerHTML = '<p class="small">まだ部屋がありません。</p>'; return; }
   for(const r of data){
     const row = document.createElement("div"); row.className="roomrow";
-    row.innerHTML = `<div><div>${esc(r.name)}</div><div class="meta">${new Date(r.created_at).toLocaleDateString("ja-JP")} ・ ${r.locked?"ロック中":"開いている"}</div></div>
+    const who = names.get(r.owner_id) || "（不明）";
+    const school = S.teacher?.is_admin ? `${r.schools?.name || "学校なし"} ・ ` : "";
+    row.innerHTML = `<div><div>${esc(r.name)}</div><div class="meta">${esc(school)}作成: ${esc(who)} ・ ${new Date(r.created_at).toLocaleDateString("ja-JP")} ・ ${r.locked?"ロック中":"開いている"}</div></div>
       <span class="code">${r.code}</span><div class="row"><button class="btn primary">開く</button><button class="btn danger">削除</button></div>`;
     const [open, del] = row.querySelectorAll("button");
-    open.addEventListener("click", async () => { S.nick="先生"; S.isTeacher=true; await enterRoom(r); });
+    open.addEventListener("click", async () => { S.nick=S.teacher?.display_name || "先生"; S.isTeacher=true; await enterRoom(r); });
     let armed=false;
     del.addEventListener("click", async () => {
       if(!armed){ armed=true; del.textContent="本当に削除"; setTimeout(()=>{armed=false; del.textContent="削除";},2500); return; }
@@ -515,9 +545,9 @@ async function bulkReplace(newMap){
   const {error} = await sb.rpc("clear_room", {p_room:S.room.id});
   if(error){ toast("消せませんでした: "+error.message); return; }
   voxels = new Map(); authors = new Map(); history.length=0; markDirty();
-  const rows = [...newMap].map(([k,c]) => { const [x,y,z]=parse(k); return {room_id:S.room.id, x,y,z, color:c, author:"先生"}; });
+  const rows = [...newMap].map(([k,c]) => { const [x,y,z]=parse(k); return {room_id:S.room.id, x,y,z, color:c, author:S.nick||"先生"}; });
   for(let i=0;i<rows.length;i+=500){ const r = await sb.from("blocks").upsert(rows.slice(i,i+500)); if(r.error){ toast("送信エラー: "+r.error.message); break; } }
-  for(const [k,c] of newMap){ voxels.set(k,c); authors.set(k,"先生"); }
+  for(const [k,c] of newMap){ voxels.set(k,c); authors.set(k,S.nick||"先生"); }
   markDirty();
 }
 

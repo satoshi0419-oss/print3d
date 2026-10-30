@@ -9,7 +9,9 @@
 |---|---|
 | `index.html` | アプリ本体（生徒の入口・先生画面・エディタがすべて入った1ファイル） |
 | `config.js` | Supabase への接続設定（URL と anon キー） |
-| `sql/001_schema.sql` | データベース定義。Supabase の SQL Editor に貼って実行する |
+| `sql/001_schema.sql` | データベース定義（部屋・ブロック）。SQL Editor に貼って実行する |
+| `sql/002_grants.sql` | テーブルへのアクセス権（GRANT） |
+| `sql/003_schools.sql` | 学校・先生のまとまりと、先生登録用の関数 |
 
 ## 初回セットアップ（約15分）
 
@@ -33,11 +35,35 @@
 > 「誰が何をしてよいか」はキーではなく RLS（Row Level Security＝行ごとのアクセス制限）が守る。
 > その RLS を書いているのが `001_schema.sql` の 3 節。
 
-### 4. 先生のログイン方法を決める
-Supabase の **Authentication → Providers → Email** で
+### 4. 先生のアカウントを発行する（管理者の作業）
+先生が自分で登録する方式ではなく、管理者が発行する方式にしている。
 
-- そのまま（確認メールあり）: 先生が登録 → 届いたメールのリンクを開く → ログイン
-- **Confirm email をオフ**: 登録したらすぐログインできる（校内で使う分にはこちらが楽）
+**最初に1回だけ**
+1. `sql/002_grants.sql` → `sql/003_schools.sql` の順に SQL Editor で実行
+2. Authentication → Sign In / Providers →「Allow new users to sign up」を **オフ**（誰でも登録できる状態を止める）
+3. 自分を管理者として登録（すべての学校の部屋が見られる）
+   ```sql
+   select admin_register_teacher('satoshi0419@gmail.com', 'KUMO lab', '松井', true);
+   ```
+
+**先生1人ごとに**
+1. Authentication → Users →「Add user」→「Create new user」
+   - Email: 先生のメールアドレス
+   - Password: 仮パスワード（先生にお伝えし、ログイン後「パスワード変更」で変えてもらう）
+   - **Auto Confirm User にチェック**（確認メールなしで使える。学校のメールは外部からのメールを受け取れないことがある）
+2. SQL Editor で学校と表示名をひも付ける
+   ```sql
+   select admin_register_teacher('先生のメール', 'ひぎり舞岡小学校', '山田先生');
+   ```
+   学校名は `schools` テーブルにある名前と一字一句同じにする。学校を増やすときは
+   ```sql
+   insert into schools(name) values ('〇〇小学校');
+   ```
+
+**できること**
+- 同じ学校の先生どうしは、お互いの部屋を一覧・開く・設定変更・削除できる
+- 管理者はすべての学校の部屋を見られる（サポート用）
+- 生徒は今までどおりアカウント不要（部屋コード＋ニックネーム）
 
 ### 5. Vercel に公開する
 1. このフォルダを GitHub にプッシュ（非公開リポジトリでOK）
