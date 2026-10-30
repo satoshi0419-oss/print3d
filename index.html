@@ -456,12 +456,22 @@ function renderPeers(){
     box.appendChild(el);
   }
 }
-let lastCursorSent = 0, lastCursorCell = "";
+// カーソル位置の送信は最大1秒に1回。止まった位置は少し遅れて必ず送る。
+// Supabase Realtime は「1秒あたりのメッセージ数」に上限があり（無料100件/秒）、
+// 届いた人数分だけ数えられるため、40人が頻繁に送ると上限を超えて接続が切れる。
+const CURSOR_INTERVAL = 1000;
+let lastCursorSent = 0, lastCursorCell = "", pendingCursor = null, cursorTimer = null;
 function sendCursor(cell){
   if(!S.channel) return;
-  const now = Date.now(), ck = cell ? cell.join(",") : "";
-  if(ck===lastCursorCell || now-lastCursorSent < 120) return;
-  lastCursorSent = now; lastCursorCell = ck;
+  pendingCursor = cell;
+  const wait = CURSOR_INTERVAL - (Date.now() - lastCursorSent);
+  if(wait <= 0) flushCursor(); else if(!cursorTimer) cursorTimer = setTimeout(flushCursor, wait);
+}
+function flushCursor(){
+  cursorTimer = null;
+  const cell = pendingCursor, ck = cell ? cell.join(",") : "";
+  if(ck === lastCursorCell || !S.channel) return;
+  lastCursorSent = Date.now(); lastCursorCell = ck;
   S.channel.send({type:"broadcast", event:"cursor", payload:{id:S.myId, cell}});
 }
 
