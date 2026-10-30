@@ -43,7 +43,7 @@
 2. Authentication → Sign In / Providers →「Allow new users to sign up」を **オフ**（誰でも登録できる状態を止める）
 3. 自分を管理者として登録（すべての学校の部屋が見られる）
    ```sql
-   select admin_register_teacher('satoshi0419@gmail.com', 'KUMO lab', '松井', true);
+   select admin_register_teacher('satoshi0419@gmail.com', 'KUMO lab', '管理者', true);
    ```
 
 **先生1人ごとに**
