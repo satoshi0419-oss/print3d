@@ -185,6 +185,12 @@ section{display:flex;flex-direction:column;gap:8px}
     </section>
 
     <section>
+      <div class="label">表示</div>
+      <label class="toggle"><input type="checkbox" id="showTags" checked> 名前札を表示</label>
+      <label class="toggle"><input type="checkbox" id="showDummy"> ダミーの生徒を置く（確認用・自分の画面だけ）</label>
+    </section>
+
+    <section>
       <div class="label">模型のデータ</div>
       <p class="small" id="scaleNote"></p>
       <dl class="stats">
@@ -360,7 +366,7 @@ async function enterRoom(room){
   $("roomTitle").textContent = room.name; $("hudCode").textContent = room.code; $("hudCode").hidden=false;
   $("teacherBox").hidden = !S.isTeacher; $("tCode").textContent = room.code;
   $("btnLeave").textContent = "部屋を出る";
-  show("scrEditor"); applySettings(); markDirty();
+  show("scrEditor"); applySettings(); markDirty(); applyDummy();
   await connectRealtime();     // 先に購読してから読み込む（間に起きた変更を取りこぼさないため）
   await loadAllBlocks();
   toast(S.isTeacher ? "先生として入りました" : `${S.nick} として入りました`);
@@ -372,11 +378,11 @@ function enterSolo(){
   $("btnCopyLink").hidden = true; $("btnBackRooms").hidden = true; $("lockRoom").parentElement.hidden = true; $("authorsBox").hidden = true;
   $("btnLeave").textContent = "入口に戻る";
   if(!restoreSolo()) voxels = buildSample();
-  show("scrEditor"); applySettings(); markDirty();
+  show("scrEditor"); applySettings(); markDirty(); applyDummy();
 }
 async function leaveRoom(){
   if(S.channel){ await sb.removeChannel(S.channel); S.channel=null; }
-  peers.clear(); renderPeers(); clearPeerGhosts();
+  stopDummy(); peers.clear(); renderPeers(); clearPeerGhosts();
   $("btnCopyLink").hidden=false; $("btnBackRooms").hidden=false; $("lockRoom").parentElement.hidden=false; $("authorsBox").hidden=false;
   const wasTeacher = S.isTeacher; S.room=null;
   if(wasTeacher){ show("scrTeacher"); refreshAuth(); } else show("scrHome");
@@ -427,7 +433,7 @@ async function connectRealtime(){
       const m = metas[metas.length-1];
       const p = peers.get(id) || {}; peers.set(id, {...p, nick:m.nick, hue:m.hue, teacher:m.teacher});
     }
-    for(const id of [...peers.keys()]) if(!seen.has(id)) peers.delete(id);
+    for(const id of [...peers.keys()]) if(!seen.has(id) && id!==DUMMY_ID) peers.delete(id);
     renderPeers(); syncPeerGhosts();
   });
   ch.on("broadcast", {event:"cursor"}, ({payload}) => {
@@ -650,7 +656,7 @@ function syncPeerGhosts(){
   for(const [id,p] of peers){
     let g=peerGhosts.get(id);
     if(!g){ g=new THREE.LineSegments(ghostGeo,new THREE.LineBasicMaterial({color:new THREE.Color(`hsl(${p.hue},60%,55%)`)})); scene.add(g); peerGhosts.set(id,g); }
-    g.visible = !!p.cell; g.material.opacity = now-(p.t||0) < 10000 ? 1 : 0.35; g.material.transparent = true;
+    g.visible = tagsOn() && !!p.cell; g.material.opacity = now-(p.t||0) < 10000 ? 1 : 0.35; g.material.transparent = true;
     if(p.cell) g.position.set(p.cell[0]-OFF+0.5, p.cell[2]+0.5, p.cell[1]-OFF+0.5);
   }
   for(const [id,g] of peerGhosts) if(!peers.has(id)){ scene.remove(g); peerGhosts.delete(id); }
@@ -679,6 +685,27 @@ function updateAvatars(){
     el.style.left = ((_v.x+1)/2*r.width)+"px"; el.style.top = ((1-_v.y)/2*r.height)+"px";
   }
 }
+// ---- ダミーの生徒（確認用）: 自分の画面だけ。送信もDB書き込みもしない ----
+const DUMMY_ID="__dummy__"; let dummyTimer=null;
+const tagsOn = () => $("showTags").checked;
+function moveDummy(){
+  const p=peers.get(DUMMY_ID); if(!p) return;
+  const tops=[];
+  for(const k of voxels.keys()){ const [i,j,h]=parse(k); if(!voxels.has(key(i,j,h+1)) && h+1<H) tops.push([i,j,h+1]); }
+  p.cell = tops.length ? tops[Math.floor(Math.random()*tops.length)] : [OFF+Math.floor(Math.random()*6)-3, OFF+Math.floor(Math.random()*6)-3, 0];
+  p.t = Date.now(); syncPeerGhosts();
+}
+function applyDummy(){
+  if($("showDummy").checked){
+    if(!peers.has(DUMMY_ID)) peers.set(DUMMY_ID,{nick:"ダミー（見本）", hue:28, teacher:false});
+    moveDummy(); clearInterval(dummyTimer); dummyTimer=setInterval(moveDummy,2500);
+  }else stopDummy();
+  renderPeers(); syncPeerGhosts();
+}
+function stopDummy(){ clearInterval(dummyTimer); dummyTimer=null; peers.delete(DUMMY_ID); }
+$("showDummy").addEventListener("change", applyDummy);
+$("showTags").addEventListener("change", () => { $("avatars").hidden = !tagsOn(); syncPeerGhosts(); });
+
 function flyTo(cell){
   const target=new THREE.Vector3(cell[0]-OFF+0.5, cell[2]+0.5, cell[1]-OFF+0.5);
   const from=cam.target.clone(), fromDist=cam.dist, toDist=Math.min(cam.dist,22), t0=performance.now();
