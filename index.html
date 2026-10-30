@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>校舎ブロック工房</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+:root{
+  --bg:#f3f1ea; --panel:#fbfaf6; --fg:#2a2823; --muted:#6f6a5e; --line:#d9d4c7;
+  --accent:#2f6f8f; --accent-fg:#ffffff; --warn:#b4452c; --ok:#4f7f45;
+  --canvas:#e6ecee; --ground:#d7dfe3; --grid:#aeb9bf;
+  --display:"DotGothic16","Zen Kaku Gothic New",sans-serif;
+  --body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1b1d1f; --panel:#242729; --fg:#ecebe6; --muted:#a09d94; --line:#3a3e42;
+    --accent:#6fb3d6; --accent-fg:#101314; --warn:#e2745a; --ok:#86c07a;
+    --canvas:#26323a; --ground:#2f3d46; --grid:#4a5b66; color-scheme:dark;
+  }
+}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:14px;line-height:1.5}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+button,input,select{font:inherit}
+h1,h2{font-family:var(--display);font-weight:400;margin:0;letter-spacing:.02em}
+h1{font-size:22px} h2{font-size:18px}
+
+/* ---- 入口・先生画面 ---- */
+.screen{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;
+  padding-block:32px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;width:100%;max-width:420px;display:flex;flex-direction:column;gap:12px}
+.card.wide{max-width:720px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:12px;color:var(--muted);letter-spacing:.06em}
+.field input{padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);min-width:0}
+.field input.code{font-family:var(--display);font-size:26px;letter-spacing:.3em;text-transform:uppercase;text-align:center}
+.btn{font-weight:500;padding:10px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg);cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn.danger{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 50%,transparent)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.link{background:none;border:0;color:var(--accent);cursor:pointer;padding:0;text-decoration:underline}
+.small{font-size:12px;color:var(--muted);margin:0}
+.err{color:var(--warn);font-size:13px;margin:0}
+.roomlist{display:flex;flex-direction:column;gap:8px}
+.roomrow{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
+.roomrow .code{font-family:var(--display);font-size:20px;letter-spacing:.2em}
+.roomrow .meta{font-size:12px;color:var(--muted)}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+
+/* ---- エディタ ---- */
+.app{height:100%;display:grid;grid-template-columns:1fr 320px;grid-template-rows:100%}
+.stage{position:relative;min-width:0;min-height:0;background:var(--canvas)}
+.stage canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}
+.hud{position:absolute;left:0;right:0;top:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+  padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:16px;pointer-events:none}
+.hud>*{pointer-events:auto}
+.pill{font-size:12px;border-radius:999px;padding:3px 10px;background:var(--panel);border:1px solid var(--line);color:var(--muted)}
+.pill.code{font-family:var(--display);font-size:15px;letter-spacing:.2em;color:var(--fg)}
+.pill.lock{color:var(--warn);border-color:var(--warn)}
+.peers{display:flex;gap:6px;flex-wrap:wrap}
+.peer{display:inline-flex;align-items:center;gap:6px;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:2px 10px 2px 4px}
+.peer i{width:14px;height:14px;border-radius:4px;display:inline-block}
+.hint{position:absolute;left:0;bottom:0;padding-block:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:16px;font-size:12px;color:var(--muted)}
+.toast{position:absolute;left:50%;bottom:36px;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%}
+.toast.show{opacity:.95}
+.panel{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;min-width:0;
+  padding-block:14px 24px;padding-left:16px;padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
+section{display:flex;flex-direction:column;gap:8px}
+.label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--line);padding:3px;border-radius:8px}
+.seg button{border:0;background:transparent;color:var(--fg);padding:9px 4px;border-radius:6px;font-weight:500;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding-bottom:18px}
+.swatch{aspect-ratio:1;border-radius:8px;border:2px solid transparent;cursor:pointer;padding:0;position:relative;max-width:100%}
+.swatch[aria-pressed="true"]{border-color:var(--fg)}
+.swatch span{position:absolute;left:0;right:0;bottom:-18px;font-size:11px;color:var(--muted);text-align:center;white-space:nowrap}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row input[type=number],.row input[type=text],.row select{flex:1;min-width:0;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+.row label{color:var(--muted);font-size:13px}
+.stats{display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-variant-numeric:tabular-nums;margin:0}
+.stats dt{color:var(--muted)} .stats dd{margin:0;text-align:right;font-family:var(--display);font-size:16px}
+.stats dd small{font-family:var(--body);font-size:12px;color:var(--muted)}
+.flag{display:flex;gap:8px;align-items:center;padding:8px 10px;border-radius:8px;font-size:13px;background:color-mix(in srgb,var(--ok) 14%,transparent);color:var(--ok)}
+.flag.bad{background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn)}
+.flag b{font-family:var(--display);font-size:18px;font-weight:400}
+.btn-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer}
+.teacher{border:1px solid var(--accent);border-radius:10px;padding:12px;gap:10px}
+.authors{font-size:13px;display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-variant-numeric:tabular-nums}
+.authors span:nth-child(even){text-align:right;color:var(--muted)}
+.bigcode{font-family:var(--display);font-size:30px;letter-spacing:.3em;text-align:center;padding:6px;border:1px dashed var(--line);border-radius:8px}
+@media (max-width:760px){
+  .app{grid-template-columns:1fr;grid-template-rows:50svh 1fr}
+  .panel{border-left:0;border-top:1px solid var(--line);padding-left:max(16px,env(safe-area-inset-left,0px))}
+  .hud{padding-right:max(16px,env(safe-area-inset-right,0px))}
+  .roomrow{grid-template-columns:1fr;}
+}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+</style>
+</head>
+<body>
+
+<!-- ====================== 入口 ====================== -->
+<div class="screen" id="scrHome">
+  <h1>校舎ブロック工房</h1>
+  <div class="card">
+    <div class="field"><label for="joinCode">部屋コード（先生から聞いてね）</label><input id="joinCode" class="code" maxlength="6" autocomplete="off" placeholder="ABC123"></div>
+    <div class="field"><label for="joinNick">ニックネーム</label><input id="joinNick" maxlength="20" placeholder="例: さとし"></div>
+    <p class="err" id="joinErr" hidden></p>
+    <button class="btn primary" id="btnJoin">部屋に入る</button>
+    <button class="btn" id="btnSolo">ひとりで試す（保存はこの端末だけ）</button>
+  </div>
+  <button class="link" id="goTeacher">先生はこちら</button>
+</div>
+
+<!-- ====================== 先生 ====================== -->
+<div class="screen" id="scrTeacher" hidden>
+  <h1>校舎ブロック工房　先生用</h1>
+  <div class="card" id="authCard">
+    <div class="field"><label for="email">メールアドレス</label><input id="email" type="email" autocomplete="username"></div>
+    <div class="field"><label for="pw">パスワード（8文字以上）</label><input id="pw" type="password" autocomplete="current-password"></div>
+    <p class="err" id="authErr" hidden></p>
+    <div class="btn-row"><button class="btn primary" id="btnLogin">ログイン</button><button class="btn" id="btnSignup">新しく登録</button></div>
+    <button class="link" id="goHome">生徒の入口に戻る</button>
+  </div>
+  <div class="card wide" id="roomsCard" hidden>
+    <div class="topbar"><span id="whoami" class="small"></span><div class="row"><button class="link" id="goHome2">生徒の入口</button><button class="link" id="btnLogout">ログアウト</button></div></div>
+    <h2>部屋をつくる</h2>
+    <div class="row"><input id="newRoomName" type="text" placeholder="例: 6年1組 校舎" maxlength="40"><button class="btn primary" id="btnCreateRoom">つくる</button></div>
+    <p class="small">1つの部屋＝1つの作品です。クラス全員で1つの校舎を作るなら部屋は1つで足ります。</p>
+    <h2>じぶんの部屋</h2>
+    <div class="roomlist" id="roomList"></div>
+  </div>
+</div>
+
+<!-- ====================== エディタ ====================== -->
+<div class="app" id="scrEditor" hidden>
+  <div class="stage" id="stage">
+    <canvas id="c"></canvas>
+    <div class="hud">
+      <h1 id="roomTitle">校舎ブロック工房</h1>
+      <span class="pill code" id="hudCode" hidden></span>
+      <span class="pill lock" id="hudLock" hidden>ロック中</span>
+      <div class="peers" id="peers"></div>
+    </div>
+    <div class="hint" id="hint"></div>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <aside class="panel">
+    <section class="teacher" id="teacherBox" hidden>
+      <div class="label">先生の設定</div>
+      <div class="bigcode" id="tCode">------</div>
+      <div class="row"><button class="btn" id="btnCopyLink">生徒用リンクをコピー</button><button class="btn" id="btnBackRooms">部屋一覧へ</button></div>
+      <div class="row"><label for="maxColors">使える色</label><select id="maxColors"><option value="2">2色</option><option value="3">3色</option><option value="4">4色</option><option value="8">8色</option></select></div>
+      <div class="row"><label for="mmPer">1ブロック =</label><input id="mmPer" type="number" min="1" max="30" step="0.5" value="5"><label>mm</label><input id="mPer" type="number" min="0.1" max="10" step="0.1" value="1"><label>m（実物）</label></div>
+      <label class="toggle"><input type="checkbox" id="lockRoom"> 生徒の操作を止める（ロック）</label>
+      <div id="authorsBox"><div class="label">だれが何個</div><div class="authors" id="authors"></div></div>
+      <div class="btn-row"><button class="btn" id="btnSample">お手本を置く</button><button class="btn danger" id="btnClear">全部消す</button></div>
+    </section>
+
+    <section>
+      <div class="label">道具（1・2・3キー）</div>
+      <div class="seg" role="group" aria-label="道具">
+        <button id="mPlace" aria-pressed="true">置く</button><button id="mErase" aria-pressed="false">消す</button><button id="mPaint" aria-pressed="false">塗る</button>
+      </div>
+    </section>
+    <section>
+      <div class="label">ブロックの色</div>
+      <div class="swatches" id="swatches"></div>
+    </section>
+
+    <section>
+      <div class="label">模型のデータ</div>
+      <p class="small" id="scaleNote"></p>
+      <dl class="stats">
+        <dt>ブロック数</dt><dd id="sCount">0</dd>
+        <dt>幅 × 奥行 × 高さ</dt><dd id="sDims">—</dd>
+        <dt>印刷サイズ</dt><dd id="sMm">—</dd>
+        <dt>重さの目安（PLA）</dt><dd id="sWeight">—</dd>
+      </dl>
+      <div class="flag" id="floatFlag"><b id="floatCount">0</b><span></span></div>
+      <div class="flag" id="overFlag"><b id="overCount">0</b><span></span></div>
+      <div class="flag" id="swapFlag"><b id="swapCount">0</b><span></span></div>
+      <p class="small" id="swapNote"></p>
+      <label class="toggle"><input type="checkbox" id="showFloat" checked> 浮き（赤）と支えなし（橙）を色で表示</label>
+    </section>
+
+    <section>
+      <div class="label">書き出し</div>
+      <div class="row"><label for="fname">ファイル名</label><input id="fname" type="text" value="school"></div>
+      <label class="toggle"><input type="checkbox" id="fillExport" checked> 中を詰めて書き出す（サポート材いらず）</label>
+      <label class="toggle"><input type="checkbox" id="splitExport"> 色ごとに別々のSTL（zip）</label>
+      <button class="btn primary" id="btnStl">STLファイルを書き出す</button>
+      <div class="btn-row"><button class="btn" id="btnSave">JSON保存</button><button class="btn" id="btnLoad">JSON読み込み</button></div>
+      <input type="file" id="fileIn" accept=".json,application/json" hidden>
+    </section>
+
+    <section>
+      <div class="btn-row"><button class="btn" id="btnUndo">1つ戻す</button><button class="btn" id="btnLeave">部屋を出る</button></div>
+    </section>
+  </aside>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script>
+(() => {
+"use strict";
+// ============================================================
+// 設定・共通
+// ============================================================
+const N = 32, H = 32;
+const PALETTE = [
+  {name:"白い壁", hex:"#efe9dc"},{name:"屋根", hex:"#3b6ea8"},{name:"石", hex:"#8d8c85"},{name:"レンガ", hex:"#b35a3c"},
+  {name:"木", hex:"#8a5a2b"},{name:"芝生", hex:"#5e9b4c"},{name:"窓", hex:"#86bfe0"},{name:"黄色", hex:"#e3b94b"},
+];
+const FLOAT_HEX = "#d94f3a", OVER_HEX = "#e8a33a";
+const $ = id => document.getElementById(id);
+const key = (i,j,k) => `${i},${j},${k}`;
+const parse = s => s.split(",").map(Number);
+const inBounds = (i,j,k) => i>=0 && j>=0 && k>=0 && i<N && j<N && k<H;
+const fmt = x => x.toLocaleString("ja-JP",{maximumFractionDigits:1});
+const store = { get(k){ try{return localStorage.getItem(k);}catch(_){return null;} }, set(k,v){ try{localStorage.setItem(k,v);}catch(_){} } };
+let toastTimer;
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),2800); }
+
+// Supabase クライアント（設定が空なら null → ひとりで試すモードのみ）
+const CFG = window.KOUSHA_CONFIG || {};
+const sb = (CFG.supabaseUrl && CFG.supabaseAnonKey) ? supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
+
+// 画面の切り替え
+function show(id){ for(const s of ["scrHome","scrTeacher","scrEditor"]) $(s).hidden = s!==id; if(id==="scrEditor") requestAnimationFrame(resize); }
+
+// ============================================================
+// セッション状態: いまどの部屋にいて、自分は誰か
+// ============================================================
+const S = {
+  room:null,          // {id, name, code?, max_colors, mm_per_block, m_per_block, locked}
+  nick:"",            // ニックネーム
+  isTeacher:false,
+  myId: Math.random().toString(36).slice(2,10),  // 同じ部屋の中で自分を区別するだけの仮ID
+  channel:null,
+  settings:{maxColors:3, mm:5, m:1, locked:false},
+};
+let voxels = new Map();     // "i,j,k" → 色番号
+let authors = new Map();    // "i,j,k" → ニックネーム（部屋モードのみ）
+
+// ============================================================
+// 入口
+// ============================================================
+$("joinNick").value = store.get("kousha-nick") || "";
+const urlCode = new URLSearchParams(location.search).get("room");
+if(urlCode) $("joinCode").value = urlCode.toUpperCase();
+$("joinCode").addEventListener("input", e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,""); });
+$("goTeacher").addEventListener("click", () => { show("scrTeacher"); refreshAuth(); });
+$("goHome").addEventListener("click", () => show("scrHome"));
+$("goHome2").addEventListener("click", () => show("scrHome"));
+$("btnSolo").addEventListener("click", () => enterSolo());
+$("btnJoin").addEventListener("click", joinAsStudent);
+$("joinNick").addEventListener("keydown", e => { if(e.key==="Enter") joinAsStudent(); });
+
+async function joinAsStudent(){
+  const code = $("joinCode").value.trim(), nick = $("joinNick").value.trim();
+  const err = $("joinErr"); err.hidden = true;
+  if(!sb){ err.textContent = "接続設定（config.js）がまだ空です。「ひとりで試す」は使えます。"; err.hidden=false; return; }
+  if(code.length!==6){ err.textContent="部屋コードは6文字です"; err.hidden=false; return; }
+  if(!nick){ err.textContent="ニックネームを入れてね"; err.hidden=false; return; }
+  const {data, error} = await sb.rpc("room_by_code", {p_code: code});
+  if(error || !data || !data.length){ err.textContent="その部屋コードは見つかりません"; err.hidden=false; return; }
+  store.set("kousha-nick", nick);
+  S.nick = nick; S.isTeacher = false;
+  await enterRoom({...data[0], code});
+}
+
+// ============================================================
+// 先生: ログイン・部屋一覧
+// ============================================================
+async function refreshAuth(){
+  if(!sb){ $("authErr").textContent="接続設定（config.js）が空のため先生機能は使えません。"; $("authErr").hidden=false; return; }
+  const {data:{session}} = await sb.auth.getSession();
+  $("authCard").hidden = !!session; $("roomsCard").hidden = !session;
+  if(session){ $("whoami").textContent = session.user.email; await listRooms(); }
+}
+async function authAction(kind){
+  const email=$("email").value.trim(), password=$("pw").value;
+  const err=$("authErr"); err.hidden=true;
+  if(!email || password.length<8){ err.textContent="メールアドレスと8文字以上のパスワードを入れてください"; err.hidden=false; return; }
+  const r = kind==="login" ? await sb.auth.signInWithPassword({email,password}) : await sb.auth.signUp({email,password});
+  if(r.error){ err.textContent = r.error.message; err.hidden=false; return; }
+  if(kind==="signup" && !r.data.session){ err.textContent="確認メールを送りました。メール内のリンクを開いてからログインしてください。"; err.hidden=false; return; }
+  refreshAuth();
+}
+$("btnLogin").addEventListener("click", () => authAction("login"));
+$("btnSignup").addEventListener("click", () => authAction("signup"));
+$("btnLogout").addEventListener("click", async () => { await sb.auth.signOut(); refreshAuth(); });
+
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 0/O, 1/I は見間違えるので除外
+const genCode = () => Array.from({length:6}, () => CODE_CHARS[Math.floor(Math.random()*CODE_CHARS.length)]).join("");
+$("btnCreateRoom").addEventListener("click", async () => {
+  const name = $("newRoomName").value.trim() || "校舎";
+  const {data:{user}} = await sb.auth.getUser();
+  for(let attempt=0; attempt<5; attempt++){
+    const {error} = await sb.from("rooms").insert({code:genCode(), name, owner_id:user.id});
+    if(!error){ $("newRoomName").value=""; await listRooms(); return; }
+    if(error.code!=="23505"){ toast("部屋を作れませんでした: "+error.message); return; } // 23505 = unique violation（コードがかぶった）
+  }
+});
+async function listRooms(){
+  const {data, error} = await sb.from("rooms").select("*").order("created_at",{ascending:false});
+  const list = $("roomList"); list.innerHTML="";
+  if(error){ list.textContent = error.message; return; }
+  if(!data.length){ list.innerHTML = '<p class="small">まだ部屋がありません。</p>'; return; }
+  for(const r of data){
+    const row = document.createElement("div"); row.className="roomrow";
+    row.innerHTML = `<div><div>${esc(r.name)}</div><div class="meta">${new Date(r.created_at).toLocaleDateString("ja-JP")} ・ ${r.locked?"ロック中":"開いている"}</div></div>
+      <span class="code">${r.code}</span><div class="row"><button class="btn primary">開く</button><button class="btn danger">削除</button></div>`;
+    const [open, del] = row.querySelectorAll("button");
+    open.addEventListener("click", async () => { S.nick="先生"; S.isTeacher=true; await enterRoom(r); });
+    let armed=false;
+    del.addEventListener("click", async () => {
+      if(!armed){ armed=true; del.textContent="本当に削除"; setTimeout(()=>{armed=false; del.textContent="削除";},2500); return; }
+      await sb.from("rooms").delete().eq("id", r.id); listRooms();
+    });
+    list.appendChild(row);
+  }
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// ============================================================
+// 部屋に入る / 出る
+// ============================================================
+function applySettings(){
+  const s = S.settings;
+  $("maxColors").value = String(s.maxColors); $("mmPer").value = s.mm; $("mPer").value = s.m; $("lockRoom").checked = s.locked;
+  $("hudLock").hidden = !s.locked;
+  [...$("swatches").children].forEach((b,i)=>{ b.hidden = i>=s.maxColors; });
+  if(color>=s.maxColors) selectColor(0);
+  updateStats();
+}
+async function enterRoom(room){
+  S.room = room;
+  S.settings = {maxColors:room.max_colors, mm:Number(room.mm_per_block), m:Number(room.m_per_block), locked:room.locked};
+  voxels = new Map(); authors = new Map(); history.length = 0;
+  $("roomTitle").textContent = room.name; $("hudCode").textContent = room.code; $("hudCode").hidden=false;
+  $("teacherBox").hidden = !S.isTeacher; $("tCode").textContent = room.code;
+  $("btnLeave").textContent = "部屋を出る";
+  show("scrEditor"); applySettings(); markDirty();
+  await connectRealtime();     // 先に購読してから読み込む（間に起きた変更を取りこぼさないため）
+  await loadAllBlocks();
+  toast(S.isTeacher ? "先生として入りました" : `${S.nick} として入りました`);
+}
+function enterSolo(){
+  S.room = null; S.isTeacher = false; S.nick = ""; authors = new Map(); history.length = 0;
+  S.settings = {maxColors:8, mm:5, m:1, locked:false};
+  $("roomTitle").textContent = "校舎ブロック工房（ひとりで試す）"; $("hudCode").hidden = true; $("teacherBox").hidden = false; $("tCode").textContent="ひとり";
+  $("btnCopyLink").hidden = true; $("btnBackRooms").hidden = true; $("lockRoom").parentElement.hidden = true; $("authorsBox").hidden = true;
+  $("btnLeave").textContent = "入口に戻る";
+  if(!restoreSolo()) voxels = buildSample();
+  show("scrEditor"); applySettings(); markDirty();
+}
+async function leaveRoom(){
+  if(S.channel){ await sb.removeChannel(S.channel); S.channel=null; }
+  peers.clear(); renderPeers(); clearPeerGhosts();
+  $("btnCopyLink").hidden=false; $("btnBackRooms").hidden=false; $("lockRoom").parentElement.hidden=false; $("authorsBox").hidden=false;
+  const wasTeacher = S.isTeacher; S.room=null;
+  if(wasTeacher){ show("scrTeacher"); refreshAuth(); } else show("scrHome");
+}
+$("btnLeave").addEventListener("click", leaveRoom);
+$("btnBackRooms").addEventListener("click", leaveRoom);
+$("btnCopyLink").addEventListener("click", async () => {
+  const url = `${location.origin}${location.pathname}?room=${S.room.code}`;
+  try{ await navigator.clipboard.writeText(url); toast("生徒用リンクをコピーしました"); }catch(_){ prompt("このリンクを生徒に配ってください", url); }
+});
+
+// ------------------------------------------------------------
+// データ読み込み: Supabase は1回に1000行までなので、1000行ずつ繰り返し取る
+// ------------------------------------------------------------
+async function loadAllBlocks(){
+  let from = 0; const PAGE = 1000;
+  while(true){
+    const {data, error} = await sb.from("blocks").select("x,y,z,color,author").eq("room_id", S.room.id).range(from, from+PAGE-1);
+    if(error){ toast("読み込みエラー: "+error.message); break; }
+    for(const b of data){ voxels.set(key(b.x,b.y,b.z), b.color); if(b.author) authors.set(key(b.x,b.y,b.z), b.author); }
+    if(data.length < PAGE) break;
+    from += PAGE;
+  }
+  markDirty();
+}
+
+// ------------------------------------------------------------
+// Realtime: ①DBの変更(postgres_changes) ②今いる人(presence) ③カーソル・設定(broadcast)
+// ------------------------------------------------------------
+const peers = new Map(); // myId → {nick, hue, cell?, t}
+async function connectRealtime(){
+  if(S.channel) await sb.removeChannel(S.channel);
+  const ch = sb.channel(`room:${S.room.id}`, {config:{presence:{key:S.myId}, broadcast:{self:false}}});
+  ch.on("postgres_changes", {event:"*", schema:"public", table:"blocks", filter:`room_id=eq.${S.room.id}`}, payload => {
+    if(payload.eventType==="DELETE"){
+      const o = payload.old; if(o.x===undefined) return;
+      const k = key(o.x,o.y,o.z); voxels.delete(k); authors.delete(k);
+    }else{
+      const n = payload.new; const k = key(n.x,n.y,n.z); voxels.set(k, n.color); if(n.author) authors.set(k, n.author);
+    }
+    markDirty();
+  });
+  ch.on("presence", {event:"sync"}, () => {
+    const state = ch.presenceState();
+    const seen = new Set();
+    for(const [id, metas] of Object.entries(state)){
+      if(id===S.myId) continue; seen.add(id);
+      const m = metas[metas.length-1];
+      const p = peers.get(id) || {}; peers.set(id, {...p, nick:m.nick, hue:m.hue, teacher:m.teacher});
+    }
+    for(const id of [...peers.keys()]) if(!seen.has(id)) peers.delete(id);
+    renderPeers(); syncPeerGhosts();
+  });
+  ch.on("broadcast", {event:"cursor"}, ({payload}) => {
+    const p = peers.get(payload.id); if(!p) return; p.cell = payload.cell; p.t = Date.now(); syncPeerGhosts();
+  });
+  ch.on("broadcast", {event:"settings"}, ({payload}) => { S.settings = payload; applySettings(); if(!S.isTeacher) toast(payload.locked ? "先生が操作を止めました" : "設定が変わりました"); });
+  await ch.subscribe(async status => {
+    if(status==="SUBSCRIBED") await ch.track({nick:S.nick, hue:hueOf(S.nick+S.myId), teacher:S.isTeacher});
+  });
+  S.channel = ch;
+}
+function hueOf(s){ let h=0; for(const c of s) h=(h*31+c.charCodeAt(0))>>>0; return h%360; }
+function renderPeers(){
+  const box = $("peers"); box.innerHTML="";
+  for(const p of peers.values()){
+    const el = document.createElement("span"); el.className="peer";
+    el.innerHTML = `<i style="background:hsl(${p.hue} 60% 55%)"></i>${esc(p.nick)}${p.teacher?"（先生）":""}`;
+    box.appendChild(el);
+  }
+}
+let lastCursorSent = 0, lastCursorCell = "";
+function sendCursor(cell){
+  if(!S.channel) return;
+  const now = Date.now(), ck = cell ? cell.join(",") : "";
+  if(ck===lastCursorCell || now-lastCursorSent < 120) return;
+  lastCursorSent = now; lastCursorCell = ck;
+  S.channel.send({type:"broadcast", event:"cursor", payload:{id:S.myId, cell}});
+}
+
+// ------------------------------------------------------------
+// 書き込み: まず自分の画面を変え（楽観的更新）、DBに送る。失敗したら戻す
+// ------------------------------------------------------------
+async function remoteApply(changes){ // changes: [{k, before, after}]
+  if(!S.room) return true;
+  const ups = [], dels = [];
+  for(const c of changes){ const [x,y,z] = parse(c.k); if(c.after===null) dels.push({x,y,z}); else ups.push({room_id:S.room.id, x,y,z, color:c.after, author:S.nick}); }
+  let error = null;
+  if(ups.length){ const r = await sb.from("blocks").upsert(ups); error = r.error; }
+  for(const d of dels){ if(error) break; const r = await sb.from("blocks").delete().match({room_id:S.room.id, ...d}); error = r.error; }
+  if(error){
+    for(const c of changes){ if(c.before===null) voxels.delete(c.k); else voxels.set(c.k, c.before); }
+    markDirty();
+    toast(/row-level security|policy/i.test(error.message) ? "いまはロック中で置けません" : "送信できませんでした: "+error.message);
+    return false;
+  }
+  return true;
+}
+const history = [];
+async function commit(changes){
+  if(!changes.length) return;
+  if(S.room && S.settings.locked && !S.isTeacher){ toast("先生がロック中です"); return; }
+  for(const c of changes){ if(c.after===null) voxels.delete(c.k); else voxels.set(c.k, c.after); if(S.room) authors.set(c.k, S.nick); }
+  history.push(changes); if(history.length>60) history.shift();
+  markDirty();
+  await remoteApply(changes);
+}
+async function undo(){
+  const last = history.pop(); if(!last) return;
+  const inverse = last.map(c => ({k:c.k, before:c.after, after:c.before}));
+  for(const c of inverse){ if(c.after===null) voxels.delete(c.k); else voxels.set(c.k, c.after); }
+  markDirty(); toast("1つ戻しました");
+  await remoteApply(inverse);
+}
+async function bulkReplace(newMap){
+  if(!S.room){ history.push([...voxels].map(([k,c])=>({k,before:c,after:null})).concat([...newMap].map(([k,c])=>({k,before:null,after:c})))); voxels = new Map(newMap); markDirty(); return; }
+  if(!S.isTeacher){ toast("先生だけができます"); return; }
+  const {error} = await sb.rpc("clear_room", {p_room:S.room.id});
+  if(error){ toast("消せませんでした: "+error.message); return; }
+  voxels = new Map(); authors = new Map(); history.length=0; markDirty();
+  const rows = [...newMap].map(([k,c]) => { const [x,y,z]=parse(k); return {room_id:S.room.id, x,y,z, color:c, author:"先生"}; });
+  for(let i=0;i<rows.length;i+=500){ const r = await sb.from("blocks").upsert(rows.slice(i,i+500)); if(r.error){ toast("送信エラー: "+r.error.message); break; } }
+  for(const [k,c] of newMap){ voxels.set(k,c); authors.set(k,"先生"); }
+  markDirty();
+}
+
+// 先生の設定変更 → DBに保存 → 全員に broadcast
+async function teacherSettingsChanged(){
+  S.settings = {maxColors:parseInt($("maxColors").value,10), mm:parseFloat($("mmPer").value)||5, m:parseFloat($("mPer").value)||1, locked:$("lockRoom").checked};
+  applySettings();
+  if(!S.room){ store.set("kousha-solo-settings", JSON.stringify(S.settings)); return; }
+  const {error} = await sb.from("rooms").update({max_colors:S.settings.maxColors, mm_per_block:S.settings.mm, m_per_block:S.settings.m, locked:S.settings.locked}).eq("id", S.room.id);
+  if(error){ toast("設定を保存できませんでした: "+error.message); return; }
+  S.channel?.send({type:"broadcast", event:"settings", payload:S.settings});
+}
+for(const id of ["maxColors","mmPer","mPer","lockRoom"]) $(id).addEventListener("change", teacherSettingsChanged);
+
+// ============================================================
+// お手本（2階建ての校舎 + 体育館、3色）
+// ============================================================
+function buildSample(){
+  const v = new Map();
+  const set = (i,j,k,c) => { if(inBounds(i,j,k)) v.set(key(i,j,k),c); };
+  const box = (x0,y0,z0,x1,y1,z1,c) => { for(let i=x0;i<=x1;i++) for(let j=y0;j<=y1;j++) for(let k=z0;k<=z1;k++) set(i,j,k,c); };
+  const X0=6, Y0=12, W=16, D=6;
+  for(let f=0; f<2; f++){
+    const z0=f*3;
+    for(let i=X0;i<X0+W;i++) for(let j=Y0;j<Y0+D;j++) for(let k=z0;k<z0+3;k++){
+      if(i===X0||i===X0+W-1||j===Y0||j===Y0+D-1) set(i,j,k,0);
+    }
+    if(f===1) box(X0,Y0,z0,X0+W-1,Y0+D-1,z0,2);
+  }
+  v.delete(key(X0+7,Y0+D-1,0)); v.delete(key(X0+8,Y0+D-1,0));
+  box(X0,Y0,6,X0+W-1,Y0+D-1,6,1);
+  const GX=X0+W+2, GY=Y0-1;
+  for(let i=GX;i<GX+8;i++) for(let j=GY;j<GY+7;j++) for(let k=0;k<4;k++) if(i===GX||i===GX+7||j===GY||j===GY+6) set(i,j,k,0);
+  box(GX,GY,4,GX+7,GY+6,4,2); box(GX,GY+1,5,GX+7,GY+5,5,2); box(GX,GY+2,6,GX+7,GY+4,6,2);
+  box(X0+W,Y0+2,0,X0+W+1,Y0+2,1,0); box(X0+W,Y0+3,0,X0+W+1,Y0+3,1,0); box(X0+W,Y0+2,2,X0+W+1,Y0+3,2,1);
+  return v;
+}
+
+// ============================================================
+// 形の計算: 面・浮き・支えなし・詰め・STL
+// ============================================================
+const FACES = [
+  {n:[ 1,0,0], v:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]]},
+  {n:[-1,0,0], v:[[0,0,0],[0,0,1],[0,1,1],[0,1,0]]},
+  {n:[0, 1,0], v:[[0,1,0],[0,1,1],[1,1,1],[1,1,0]]},
+  {n:[0,-1,0], v:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]]},
+  {n:[0,0, 1], v:[[0,0,1],[1,0,1],[1,1,1],[0,1,1]]},
+  {n:[0,0,-1], v:[[0,0,0],[0,1,0],[1,1,0],[1,0,0]]},
+];
+function exposedFaces(src){
+  const out=[];
+  for(const [k,c] of src){ const [i,j,h]=parse(k); for(const f of FACES){ if(src.has(key(i+f.n[0],j+f.n[1],h+f.n[2]))) continue; out.push({i,j,h,c,f}); } }
+  return out;
+}
+function findFloating(src){
+  const seen=new Set(), stack=[];
+  for(const k of src.keys()) if(parse(k)[2]===0){ seen.add(k); stack.push(k); }
+  while(stack.length){ const [i,j,h]=parse(stack.pop()); for(const f of FACES){ const nk=key(i+f.n[0],j+f.n[1],h+f.n[2]); if(src.has(nk)&&!seen.has(nk)){ seen.add(nk); stack.push(nk); } } }
+  const out=new Set(); for(const k of src.keys()) if(!seen.has(k)) out.add(k); return out;
+}
+function findOverhang(src){ const out=new Set(); for(const k of src.keys()){ const [i,j,h]=parse(k); if(h>0 && !src.has(key(i,j,h-1))) out.add(k); } return out; }
+function filledVoxels(src){
+  const top=new Map();
+  for(const [k,c] of src){ const [i,j,h]=parse(k); const t=top.get(`${i},${j}`); if(!t||h>t.h) top.set(`${i},${j}`,{h,c}); }
+  const v=new Map(src);
+  for(const [ij,{h,c}] of top){ const [i,j]=ij.split(",").map(Number); for(let z=0;z<h;z++){ const kk=key(i,j,z); if(!v.has(kk)) v.set(kk,c); } }
+  return v;
+}
+function buildSTL(src, mm){
+  const faces=exposedFaces(src), triCount=faces.length*2;
+  const buf=new ArrayBuffer(84+triCount*50), dv=new DataView(buf);
+  const header="Kousha Block Studio - mm, z-up"; for(let i=0;i<header.length;i++) dv.setUint8(i,header.charCodeAt(i));
+  dv.setUint32(80,triCount,true); let o=84;
+  const tri=(n,a,b,c)=>{ dv.setFloat32(o,n[0],true);dv.setFloat32(o+4,n[1],true);dv.setFloat32(o+8,n[2],true);o+=12; for(const p of [a,b,c]){dv.setFloat32(o,p[0]*mm,true);dv.setFloat32(o+4,p[1]*mm,true);dv.setFloat32(o+8,p[2]*mm,true);o+=12;} dv.setUint16(o,0,true);o+=2; };
+  for(const {i,j,h,f} of faces){ const V=f.v.map(p=>[p[0]+i,p[1]+j,p[2]+h]); tri(f.n,V[0],V[1],V[2]); tri(f.n,V[0],V[2],V[3]); }
+  return buf;
+}
+function crc32(bytes){ let c,crc=0xFFFFFFFF; for(let n=0;n<bytes.length;n++){ c=(crc^bytes[n])&0xFF; for(let k=0;k<8;k++) c=c&1?(c>>>1)^0xEDB88320:c>>>1; crc=(crc>>>8)^c; } return (crc^0xFFFFFFFF)>>>0; }
+function makeZip(entries){
+  const parts=[], centrals=[]; let offset=0;
+  for(const e of entries){
+    const name=new TextEncoder().encode(e.name), bytes=new Uint8Array(e.data), crc=crc32(bytes);
+    const local=new Uint8Array(30+name.length), ld=new DataView(local.buffer);
+    ld.setUint32(0,0x04034b50,true); ld.setUint16(4,20,true); ld.setUint16(6,0x0800,true); ld.setUint16(8,0,true); ld.setUint16(10,0,true); ld.setUint16(12,0x5021,true);
+    ld.setUint32(14,crc,true); ld.setUint32(18,bytes.length,true); ld.setUint32(22,bytes.length,true); ld.setUint16(26,name.length,true); ld.setUint16(28,0,true); local.set(name,30);
+    const central=new Uint8Array(46+name.length), cd=new DataView(central.buffer);
+    cd.setUint32(0,0x02014b50,true); cd.setUint16(4,20,true); cd.setUint16(6,20,true); cd.setUint16(8,0x0800,true); cd.setUint16(10,0,true); cd.setUint16(12,0,true); cd.setUint16(14,0x5021,true);
+    cd.setUint32(16,crc,true); cd.setUint32(20,bytes.length,true); cd.setUint32(24,bytes.length,true); cd.setUint16(28,name.length,true); cd.setUint16(30,0,true); cd.setUint16(32,0,true); cd.setUint16(34,0,true); cd.setUint16(36,0,true); cd.setUint32(38,0,true); cd.setUint32(42,offset,true); central.set(name,46);
+    parts.push(local,bytes); centrals.push(central); offset+=local.length+bytes.length;
+  }
+  const cdSize=centrals.reduce((a,c)=>a+c.length,0), end=new Uint8Array(22), ed=new DataView(end.buffer);
+  ed.setUint32(0,0x06054b50,true); ed.setUint16(8,entries.length,true); ed.setUint16(10,entries.length,true); ed.setUint32(12,cdSize,true); ed.setUint32(16,offset,true); ed.setUint16(20,0,true);
+  return new Blob([...parts,...centrals,end]);
+}
+function download(filename, data){
+  const blob = data instanceof Blob ? data : new Blob([data]);
+  const url=URL.createObjectURL(blob), a=document.createElement("a"); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+
+// ============================================================
+// 3D表示（Three.js）: 世界座標 x=i, y=k(高さ), z=j
+// ============================================================
+const canvas=$("c");
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true}); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene=new THREE.Scene(); const camera=new THREE.PerspectiveCamera(45,1,0.1,500);
+const OFF=N/2;
+scene.add(new THREE.HemisphereLight(0xffffff,0x8a8f99,0.95));
+const sun=new THREE.DirectionalLight(0xffffff,0.7); sun.position.set(20,40,12); scene.add(sun);
+const grid=new THREE.GridHelper(N,N); scene.add(grid);
+const groundMat=new THREE.MeshLambertMaterial(); const ground=new THREE.Mesh(new THREE.PlaneGeometry(N,N),groundMat); ground.rotation.x=-Math.PI/2; ground.position.y=-0.005; scene.add(ground);
+const voxMesh=new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshLambertMaterial({vertexColors:true})); scene.add(voxMesh);
+const ghostGeo=new THREE.EdgesGeometry(new THREE.BoxGeometry(1.02,1.02,1.02));
+const ghost=new THREE.LineSegments(ghostGeo,new THREE.LineBasicMaterial({color:0x000000})); ghost.visible=false; scene.add(ghost);
+const peerGhosts=new Map(); // peerId → LineSegments
+function syncPeerGhosts(){
+  const now=Date.now();
+  for(const [id,p] of peers){
+    let g=peerGhosts.get(id);
+    if(!g){ g=new THREE.LineSegments(ghostGeo,new THREE.LineBasicMaterial({color:new THREE.Color(`hsl(${p.hue},60%,55%)`)})); scene.add(g); peerGhosts.set(id,g); }
+    g.visible = !!p.cell && now-(p.t||0) < 6000;
+    if(p.cell) g.position.set(p.cell[0]-OFF+0.5, p.cell[2]+0.5, p.cell[1]-OFF+0.5);
+  }
+  for(const [id,g] of peerGhosts) if(!peers.has(id)){ scene.remove(g); peerGhosts.delete(id); }
+}
+function clearPeerGhosts(){ for(const g of peerGhosts.values()) scene.remove(g); peerGhosts.clear(); }
+setInterval(syncPeerGhosts, 2000);
+
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function applyTheme(){ scene.background=new THREE.Color(cssVar("--canvas")); groundMat.color=new THREE.Color(cssVar("--ground")); grid.material.color=new THREE.Color(cssVar("--grid")); ghost.material.color=new THREE.Color(cssVar("--fg")); }
+applyTheme(); matchMedia("(prefers-color-scheme: dark)").addEventListener("change",applyTheme);
+
+let floating=new Set(), overhang=new Set(), dirty=false;
+function markDirty(){ if(dirty) return; dirty=true; requestAnimationFrame(()=>{ dirty=false; rebuild(); }); }
+function rebuild(){
+  floating=findFloating(voxels); overhang=findOverhang(voxels);
+  const faces=exposedFaces(voxels), showFloat=$("showFloat").checked;
+  const pos=new Float32Array(faces.length*18), nor=new Float32Array(faces.length*18), col=new Float32Array(faces.length*18);
+  let p=0; const tmp=new THREE.Color();
+  for(const {i,j,h,c,f} of faces){
+    const kk=key(i,j,h);
+    tmp.set(showFloat&&floating.has(kk)?FLOAT_HEX : showFloat&&overhang.has(kk)?OVER_HEX : PALETTE[c].hex);
+    const V=f.v.map(q=>[q[0]+i-OFF,q[2]+h,q[1]+j-OFF]), n=[f.n[0],f.n[2],f.n[1]];
+    for(const idx of [0,1,2,0,2,3]){ pos.set(V[idx],p); nor.set(n,p); col.set([tmp.r,tmp.g,tmp.b],p); p+=3; }
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute("position",new THREE.BufferAttribute(pos,3)); g.setAttribute("normal",new THREE.BufferAttribute(nor,3)); g.setAttribute("color",new THREE.BufferAttribute(col,3));
+  voxMesh.geometry.dispose(); voxMesh.geometry=g;
+  updateStats();
+  if(!S.room) store.set("kousha-solo", JSON.stringify([...voxels].map(([k,c])=>[...parse(k),c])));
+}
+function restoreSolo(){
+  try{ const raw=store.get("kousha-solo"); if(!raw) return false; const arr=JSON.parse(raw); if(!arr.length) return false;
+    voxels=new Map(); for(const [i,j,k,c] of arr) if(inBounds(i,j,k)) voxels.set(key(i,j,k),c);
+    const st=store.get("kousha-solo-settings"); if(st) S.settings={...S.settings,...JSON.parse(st)}; return true; }catch(_){ return false; }
+}
+
+// ---- カメラ ----
+const cam={target:new THREE.Vector3(0,3,0),theta:Math.PI/4,phi:Math.PI/3.4,dist:46};
+function updateCamera(){ const s=Math.sin(cam.phi); camera.position.set(cam.target.x+cam.dist*s*Math.sin(cam.theta), cam.target.y+cam.dist*Math.cos(cam.phi), cam.target.z+cam.dist*s*Math.cos(cam.theta)); camera.lookAt(cam.target); }
+function orbit(dx,dy){ cam.theta-=dx*0.006; cam.phi=Math.min(Math.PI/2-0.02,Math.max(0.15,cam.phi-dy*0.006)); updateCamera(); }
+function pan(dx,dy){ const right=new THREE.Vector3(), up=new THREE.Vector3(0,1,0); camera.getWorldDirection(right); right.cross(up).normalize(); const k=cam.dist*0.0016; cam.target.addScaledVector(right,-dx*k); cam.target.addScaledVector(up,dy*k); updateCamera(); }
+function zoom(f){ cam.dist=Math.min(140,Math.max(6,cam.dist*f)); updateCamera(); }
+
+// ---- 入力 ----
+let mode="place", color=0;
+const pointers=new Map(); let dragging=false, downPos=null, downButton=0, lastPinch=0, lastMid=null;
+const ray=new THREE.Raycaster(), ndc=new THREE.Vector2();
+function pick(cx,cy){
+  const r=canvas.getBoundingClientRect(); ndc.set(((cx-r.left)/r.width)*2-1, -((cy-r.top)/r.height)*2+1); ray.setFromCamera(ndc,camera);
+  const hits=ray.intersectObjects([voxMesh,ground]); if(!hits.length) return null;
+  const h=hits[0], p=h.point;
+  if(h.object===ground) return {target:[Math.floor(p.x+OFF),Math.floor(p.z+OFF),0], existing:null};
+  const n=h.face.normal;
+  return {target:[Math.floor(p.x+n.x*0.5+OFF),Math.floor(p.z+n.z*0.5+OFF),Math.floor(p.y+n.y*0.5)], existing:[Math.floor(p.x-n.x*0.5+OFF),Math.floor(p.z-n.z*0.5+OFF),Math.floor(p.y-n.y*0.5)]};
+}
+function act(cx,cy,forceErase){
+  const hit=pick(cx,cy); if(!hit) return;
+  const m=forceErase?"erase":mode;
+  if(m==="place"){ const [i,j,k]=hit.target; if(!inBounds(i,j,k)){ toast("作業台の外には置けません"); return; } const kk=key(i,j,k); if(voxels.has(kk)) return; commit([{k:kk,before:null,after:color}]); }
+  else if(m==="erase"){ if(!hit.existing) return; const kk=key(...hit.existing); if(!voxels.has(kk)) return; commit([{k:kk,before:voxels.get(kk),after:null}]); }
+  else { if(!hit.existing) return; const kk=key(...hit.existing); if(!voxels.has(kk)||voxels.get(kk)===color) return; commit([{k:kk,before:voxels.get(kk),after:color}]); }
+}
+function updateGhost(cx,cy){
+  const hit=pick(cx,cy);
+  const cell = hit ? (mode==="place"?hit.target:hit.existing) : null;
+  if(!cell||!inBounds(...cell)){ ghost.visible=false; sendCursor(null); return; }
+  ghost.visible=true; ghost.position.set(cell[0]-OFF+0.5,cell[2]+0.5,cell[1]-OFF+0.5); sendCursor(cell);
+}
+canvas.addEventListener("contextmenu",e=>e.preventDefault());
+canvas.addEventListener("pointerdown",e=>{ canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===1){ dragging=false; downPos={x:e.clientX,y:e.clientY}; downButton=e.button; }
+  if(pointers.size===2){ const [a,b]=[...pointers.values()]; lastPinch=Math.hypot(a.x-b.x,a.y-b.y); lastMid={x:(a.x+b.x)/2,y:(a.y+b.y)/2}; dragging=true; } });
+canvas.addEventListener("pointermove",e=>{
+  const prev=pointers.get(e.pointerId); if(!prev){ updateGhost(e.clientX,e.clientY); return; }
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===2){ const [a,b]=[...pointers.values()]; const d=Math.hypot(a.x-b.x,a.y-b.y), mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2}; if(lastPinch) zoom(lastPinch/d); if(lastMid) pan(mid.x-lastMid.x,mid.y-lastMid.y); lastPinch=d; lastMid=mid; ghost.visible=false; return; }
+  const dx=e.clientX-prev.x, dy=e.clientY-prev.y;
+  if(!dragging&&downPos&&Math.hypot(e.clientX-downPos.x,e.clientY-downPos.y)>6) dragging=true;
+  if(dragging){ ghost.visible=false; if(downButton===2) pan(dx,dy); else orbit(dx,dy); } else updateGhost(e.clientX,e.clientY);
+});
+function endPointer(e){ const wasSingle=pointers.size===1; pointers.delete(e.pointerId);
+  if(wasSingle&&!dragging&&downPos){ act(e.clientX,e.clientY,downButton===2||e.shiftKey); updateGhost(e.clientX,e.clientY); }
+  if(pointers.size<2){ lastPinch=0; lastMid=null; } if(pointers.size===0){ dragging=false; downPos=null; } }
+canvas.addEventListener("pointerup",endPointer); canvas.addEventListener("pointercancel",endPointer);
+canvas.addEventListener("pointerleave",()=>{ if(pointers.size===0){ ghost.visible=false; sendCursor(null); } });
+canvas.addEventListener("wheel",e=>{ e.preventDefault(); zoom(e.deltaY>0?1.1:0.9); },{passive:false});
+document.addEventListener("keydown",e=>{ if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT"||$("scrEditor").hidden) return;
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); }
+  if(e.key==="1") setMode("place"); if(e.key==="2") setMode("erase"); if(e.key==="3") setMode("paint"); });
+
+// ---- パネル ----
+const modeBtns={place:"mPlace",erase:"mErase",paint:"mPaint"};
+function setMode(m){ mode=m; for(const [k,id] of Object.entries(modeBtns)) $(id).setAttribute("aria-pressed",String(k===m));
+  $("hint").textContent = m==="place"?"クリックで置く　ドラッグで回す　ホイールで拡大　右ドラッグで移動　Ctrl+Z で戻す" : m==="erase"?"ブロックをクリックで消す（右クリックでも消せます）":"ブロックをクリックで選んだ色に塗る"; }
+for(const [k,id] of Object.entries(modeBtns)) $(id).addEventListener("click",()=>setMode(k));
+setMode("place");
+const sw=$("swatches");
+function selectColor(idx){ color=idx; [...sw.children].forEach((x,i)=>x.setAttribute("aria-pressed",String(i===idx))); }
+PALETTE.forEach((c,idx)=>{ const b=document.createElement("button"); b.className="swatch"; b.style.background=c.hex; b.setAttribute("aria-label",c.name); b.innerHTML=`<span>${c.name}</span>`; b.addEventListener("click",()=>selectColor(idx)); sw.appendChild(b); });
+selectColor(0);
+$("showFloat").addEventListener("change",markDirty);
+$("fillExport").addEventListener("change",updateStats);
+
+function updateStats(){
+  const mm=S.settings.mm, m=S.settings.m, n=voxels.size;
+  let min=[Infinity,Infinity,Infinity], max=[-Infinity,-Infinity,-Infinity];
+  for(const k of voxels.keys()){ const p=parse(k); for(let a=0;a<3;a++){ if(p[a]<min[a])min[a]=p[a]; if(p[a]>max[a])max[a]=p[a]; } }
+  const dims=n?[max[0]-min[0]+1,max[1]-min[1]+1,max[2]-min[2]+1]:[0,0,0];
+  const fill=$("fillExport").checked, src=fill?filledVoxels(voxels):voxels, vol=src.size*Math.pow(mm/10,3);
+  $("sCount").textContent=n.toLocaleString("ja-JP");
+  $("sDims").innerHTML=n?`${dims[0]} × ${dims[1]} × ${dims[2]} <small>ブロック</small>`:"—";
+  $("sMm").innerHTML=n?`${fmt(dims[0]*mm)} × ${fmt(dims[1]*mm)} × ${fmt(dims[2]*mm)} <small>mm</small>`:"—";
+  $("sWeight").innerHTML=n?`${fmt(vol*1.24)} <small>g${fill?"（詰めた場合）":""}</small>`:"—";
+  $("scaleNote").textContent=`1ブロック = ${mm} mm（実物 ${m} m）。縮尺およそ 1 : ${Math.round(m*1000/mm).toLocaleString("ja-JP")}。`;
+  const fl=$("floatFlag"); $("floatCount").textContent=floating.size; fl.classList.toggle("bad",floating.size>0);
+  fl.lastElementChild.textContent=floating.size?"個が地面につながっていません。印刷すると落ちます。":"浮いているブロックはありません";
+  const of=$("overFlag"); $("overCount").textContent=overhang.size; of.classList.toggle("bad",overhang.size>0&&!fill);
+  of.lastElementChild.textContent=overhang.size?(fill?"個は真下が空いていますが、詰めて書き出すので大丈夫です":"個は真下が空いています。サポート材が必要です"):"下に支えのないブロックはありません";
+  // 色の交換（0.2mm積層・交換1回90秒で計算）
+  const layersPerBlock=Math.max(1,Math.round(mm/0.2)), perLevel=new Map();
+  for(const [k,c] of src){ const h=parse(k)[2]; if(!perLevel.has(h)) perLevel.set(h,new Set()); perLevel.get(h).add(c); }
+  let swaps=0; const mixed=[]; let prev=null;
+  for(const h of [...perLevel.keys()].sort((a,b)=>a-b)){ const set=perLevel.get(h); if(set.size>1){ swaps+=(set.size-1)*layersPerBlock; mixed.push(h+1); } else if(prev&&!prev.has([...set][0])) swaps+=1; prev=set; }
+  const sf=$("swapFlag"); $("swapCount").textContent=swaps.toLocaleString("ja-JP"); sf.classList.toggle("bad",mixed.length>0);
+  sf.lastElementChild.textContent=swaps===0?"色の交換はありません":mixed.length?`回の色交換 ≈ +${fmt(swaps*1.5)}分。${mixed.length}段で色が混ざっています`:`回だけ（段の境目）≈ +${fmt(swaps*1.5)}分`;
+  $("swapNote").textContent=mixed.length?`混ざっている段: 下から ${mixed.join("、")} 段目。段ごとに1色にすると交換が激減します。`:"";
+  $("btnUndo").disabled=history.length===0; $("btnStl").disabled=n===0;
+  // だれが何個
+  if(S.isTeacher){ const cnt=new Map(); for(const k of voxels.keys()){ const a=authors.get(k)||"（不明）"; cnt.set(a,(cnt.get(a)||0)+1); }
+    $("authors").innerHTML=[...cnt].sort((a,b)=>b[1]-a[1]).map(([a,c])=>`<span>${esc(a)}</span><span>${c}</span>`).join("")||'<span class="small">まだブロックがありません</span>'; }
+}
+function safeName(){ return ($("fname").value.trim()||"model").replace(/[\\/:*?"<>|]/g,"_"); }
+$("btnStl").addEventListener("click",()=>{
+  const mm=S.settings.mm, src=$("fillExport").checked?filledVoxels(voxels):voxels;
+  if(!$("splitExport").checked){ download(`${safeName()}.stl`,buildSTL(src,mm)); toast("STLを書き出しました"); return; }
+  const byColor=new Map(); for(const [k,c] of src){ if(!byColor.has(c)) byColor.set(c,new Map()); byColor.get(c).set(k,c); }
+  const entries=[...byColor].sort((a,b)=>a[0]-b[0]).map(([c,m])=>({name:`${safeName()}_${String(c+1).padStart(2,"0")}_${PALETTE[c].name}.stl`,data:buildSTL(m,mm)}));
+  download(`${safeName()}_colors.zip`,makeZip(entries)); toast(`${entries.length}色分のSTLをzipにしました`);
+});
+$("btnSave").addEventListener("click",()=>{ download(`${safeName()}.json`,JSON.stringify({app:"kousha-block-studio",version:2,N,H,settings:S.settings,blocks:[...voxels].map(([k,c])=>[...parse(k),c])})); toast("JSONを保存しました"); });
+$("btnLoad").addEventListener("click",()=>$("fileIn").click());
+$("fileIn").addEventListener("change",async e=>{ const f=e.target.files[0]; if(!f) return;
+  try{ const d=JSON.parse(await f.text()); if(!Array.isArray(d.blocks)) throw 0;
+    const m=new Map(); for(const b of d.blocks){ const [i,j,k,c]=b.map(Number); if(inBounds(i,j,k)&&c>=0&&c<8) m.set(key(i,j,k),c); }
+    await bulkReplace(m); toast(`${m.size}個のブロックを読み込みました`); }catch(_){ toast("このファイルは読み込めませんでした"); } e.target.value=""; });
+$("btnUndo").addEventListener("click",undo);
+let clearArmed=false;
+$("btnClear").addEventListener("click",e=>{ if(!clearArmed){ clearArmed=true; e.target.textContent="もう一度押すと消えます"; setTimeout(()=>{clearArmed=false; e.target.textContent="全部消す";},2500); return; }
+  clearArmed=false; e.target.textContent="全部消す"; bulkReplace(new Map()); toast("作業台を空にしました"); });
+$("btnSample").addEventListener("click",()=>bulkReplace(buildSample()));
+
+// ---- 起動 ----
+function resize(){ const r=canvas.parentElement.getBoundingClientRect(); if(!r.width) return; renderer.setSize(r.width,r.height,false); camera.aspect=r.width/r.height; camera.updateProjectionMatrix(); }
+new ResizeObserver(resize).observe(canvas.parentElement);
+updateCamera();
+(function loop(){ if(!$("scrEditor").hidden) renderer.render(scene,camera); requestAnimationFrame(loop); })();
+if(location.hash==="#teacher"){ show("scrTeacher"); refreshAuth(); }
+})();
+</script>
+</body>
+</html>
