@@ -608,11 +608,14 @@ const canvas=$("c");
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true}); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 const scene=new THREE.Scene(); const camera=new THREE.PerspectiveCamera(45,1,0.1,500);
 const OFF=N/2;
-scene.add(new THREE.HemisphereLight(0xffffff,0x8a8f99,0.95));
-const sun=new THREE.DirectionalLight(0xffffff,0.7); sun.position.set(20,40,12); scene.add(sun);
+// 照明は使わない: 面の向きで明るさを固定する（上=1.0, +x=0.8, -z=0.72, -x=0.62, +z=0.55, 下=0.45）。
+// 本物の照明だと「上面と側面が同じ明るさ」になる角度があり、箱の向きが読めなくなる。
+const SHADE = {"1,0,0":0.80, "-1,0,0":0.62, "0,1,0":0.55, "0,-1,0":0.72, "0,0,1":1.0, "0,0,-1":0.45};
 const grid=new THREE.GridHelper(N,N); scene.add(grid);
-const groundMat=new THREE.MeshLambertMaterial(); const ground=new THREE.Mesh(new THREE.PlaneGeometry(N,N),groundMat); ground.rotation.x=-Math.PI/2; ground.position.y=-0.005; scene.add(ground);
-const voxMesh=new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshLambertMaterial({vertexColors:true})); scene.add(voxMesh);
+const groundMat=new THREE.MeshBasicMaterial(); const ground=new THREE.Mesh(new THREE.PlaneGeometry(N,N),groundMat); ground.rotation.x=-Math.PI/2; ground.position.y=-0.005; scene.add(ground);
+const voxMesh=new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({vertexColors:true})); scene.add(voxMesh);
+// ブロックの縁の線（面の輪郭）。奥の線が手前の面に透けないよう、ほんの少しだけ面の外側に描く
+const edgeLines=new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({color:0x000000, transparent:true, opacity:0.28})); scene.add(edgeLines);
 const ghostGeo=new THREE.EdgesGeometry(new THREE.BoxGeometry(1.02,1.02,1.02));
 const ghost=new THREE.LineSegments(ghostGeo,new THREE.LineBasicMaterial({color:0x000000})); ghost.visible=false; scene.add(ghost);
 const peerGhosts=new Map(); // peerId → LineSegments
@@ -659,7 +662,7 @@ function flyTo(cell){
 setInterval(syncPeerGhosts, 2000);
 
 function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
-function applyTheme(){ scene.background=new THREE.Color(cssVar("--canvas")); groundMat.color=new THREE.Color(cssVar("--ground")); grid.material.color=new THREE.Color(cssVar("--grid")); ghost.material.color=new THREE.Color(cssVar("--fg")); }
+function applyTheme(){ scene.background=new THREE.Color(cssVar("--canvas")); groundMat.color=new THREE.Color(cssVar("--ground")); grid.material.color=new THREE.Color(cssVar("--grid")); ghost.material.color=new THREE.Color(cssVar("--fg")); edgeLines.material.color=new THREE.Color(cssVar("--fg")); }
 applyTheme(); matchMedia("(prefers-color-scheme: dark)").addEventListener("change",applyTheme);
 
 let floating=new Set(), overhang=new Set(), dirty=false;
@@ -667,17 +670,23 @@ function markDirty(){ if(dirty) return; dirty=true; requestAnimationFrame(()=>{ 
 function rebuild(){
   floating=findFloating(voxels); overhang=findOverhang(voxels);
   const faces=exposedFaces(voxels), showFloat=$("showFloat").checked;
-  const pos=new Float32Array(faces.length*18), nor=new Float32Array(faces.length*18), col=new Float32Array(faces.length*18);
-  let p=0; const tmp=new THREE.Color();
+  const pos=new Float32Array(faces.length*18), col=new Float32Array(faces.length*18), edge=new Float32Array(faces.length*24);
+  let p=0, q=0; const tmp=new THREE.Color();
   for(const {i,j,h,c,f} of faces){
     const kk=key(i,j,h);
     tmp.set(showFloat&&floating.has(kk)?FLOAT_HEX : showFloat&&overhang.has(kk)?OVER_HEX : PALETTE[c].hex);
-    const V=f.v.map(q=>[q[0]+i-OFF,q[2]+h,q[1]+j-OFF]), n=[f.n[0],f.n[2],f.n[1]];
-    for(const idx of [0,1,2,0,2,3]){ pos.set(V[idx],p); nor.set(n,p); col.set([tmp.r,tmp.g,tmp.b],p); p+=3; }
+    const sh=SHADE[f.n.join(",")];
+    const V=f.v.map(v=>[v[0]+i-OFF,v[2]+h,v[1]+j-OFF]);
+    for(const idx of [0,1,2,0,2,3]){ pos.set(V[idx],p); col.set([tmp.r*sh,tmp.g*sh,tmp.b*sh],p); p+=3; }
+    // 縁: 面を法線方向に 0.004 だけ浮かせて4辺を描く
+    const nx=f.n[0]*0.004, ny=f.n[2]*0.004, nz=f.n[1]*0.004;
+    for(let e=0;e<4;e++){ const a=V[e], b=V[(e+1)%4]; edge.set([a[0]+nx,a[1]+ny,a[2]+nz, b[0]+nx,b[1]+ny,b[2]+nz],q); q+=6; }
   }
   const g=new THREE.BufferGeometry();
-  g.setAttribute("position",new THREE.BufferAttribute(pos,3)); g.setAttribute("normal",new THREE.BufferAttribute(nor,3)); g.setAttribute("color",new THREE.BufferAttribute(col,3));
+  g.setAttribute("position",new THREE.BufferAttribute(pos,3)); g.setAttribute("color",new THREE.BufferAttribute(col,3));
   voxMesh.geometry.dispose(); voxMesh.geometry=g;
+  const eg=new THREE.BufferGeometry(); eg.setAttribute("position",new THREE.BufferAttribute(edge,3));
+  edgeLines.geometry.dispose(); edgeLines.geometry=eg;
   updateStats();
   if(!S.room) store.set("kousha-solo", JSON.stringify([...voxels].map(([k,c])=>[...parse(k),c])));
 }
