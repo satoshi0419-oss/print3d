@@ -591,12 +591,16 @@ async function connectRealtime(){
   });
   ch.on("presence", {event:"sync"}, () => {
     const state = ch.presenceState();
-    const seen = new Set();
+    const seen = new Set(); let newcomer = false;
     for(const [id, metas] of Object.entries(state)){
       if(id===S.myId) continue; seen.add(id);
       const m = metas[metas.length-1];
+      const isNew = !peers.has(id);
       const p = peers.get(id) || {}; peers.set(id, {...p, nick:m.nick, hue:m.hue, teacher:m.teacher, at:m.at});
+      if(isNew) newcomer = true;
     }
+    // 新しく入ってきた人がいたら、自分の位置を送り直す（位置は「変わったときだけ」送るので、そのままだと新しい人に届かない）
+    if(newcomer){ lastCursorKey = ""; sendCursor(myPosCell()); }
     for(const id of [...peers.keys()]) if(!seen.has(id) && id!==DUMMY_ID) peers.delete(id);
     renderPeers(); syncPeerGhosts();
     // 同じニックネーム: 先に入っていた人（または先生）を優先し、あとから来た生徒は入口に戻す
