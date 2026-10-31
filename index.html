@@ -263,6 +263,8 @@ section{display:flex;flex-direction:column;gap:8px}
       <section>
         <div class="label">表示</div>
         <label class="toggle"><input type="checkbox" id="showTags" checked> 名前札を表示</label>
+        <label class="toggle"><input type="checkbox" id="showGrid" checked> 座標の目盛り（X・Z）を表示</label>
+        <label class="toggle"><input type="checkbox" id="showCompass" checked> 方角（北・南・東・西）を表示</label>
         <label class="toggle" id="dummyRow"><input type="checkbox" id="showDummy"> ダミーの生徒を置く（確認用・自分の画面だけ）</label>
       </section>
       <section>
@@ -996,7 +998,8 @@ setInterval(() => {   // マウスを乗せていないとき（指で操作し�
   if(Date.now()-lastHoverAt < 1500 || $("scrEditor").hidden) return;
   const p=myPosCell(); $("coord").textContent = `いる場所 X ${p[0]} ・ Z ${p[1]}`;
 }, 500);
-const labelGroup=new THREE.Group(); scene.add(labelGroup);
+const labelGroup=new THREE.Group(); scene.add(labelGroup);   // 目盛り（X・Z）
+const compassGroup=new THREE.Group(); scene.add(compassGroup); // 方角（北・南・東・西）
 function textSprite(text, size, color){
   const c=document.createElement("canvas"), g=c.getContext("2d"); const fs=48;
   g.font=`bold ${fs}px sans-serif`; const w=Math.ceil(g.measureText(text).width)+24; c.width=w; c.height=fs+20;
@@ -1006,15 +1009,24 @@ function textSprite(text, size, color){
   sp.scale.set(size*w/c.height, size, 1); return sp;
 }
 function buildLabels(){
-  for(const sp of [...labelGroup.children]){ sp.material.map.dispose(); sp.material.dispose(); labelGroup.remove(sp); }
-  const f=Math.max(1, N/32), step=N<=32?8:16, s=1.1*f;
+  for(const grp of [labelGroup, compassGroup]) for(const sp of [...grp.children]){ sp.material.map.dispose(); sp.material.dispose(); grp.remove(sp); }
+  const f=Math.max(1, N/32), step=N<=32?8:32, s=0.6*f;   // 目盛りは32マスごと（32マスの部屋だけ8ごと）、文字は小さめ
   for(let v=0; v<=N; v+=step){
     const xs=textSprite(`X${v}`, s); xs.position.set(Math.min(v,N-1)-OFF+0.5, s/2, OFF+1.8*f); labelGroup.add(xs);      // 南の端に X の目盛り
     const zs=textSprite(`Z${v}`, s); zs.position.set(-OFF-2.2*f, s/2, Math.min(v,N-1)-OFF+0.5); labelGroup.add(zs);     // 西の端に Z の目盛り
   }
   const big=2.2*f;
-  [["北",0,-OFF-3*f],["南",0,OFF+4.5*f],["東",OFF+3*f,0],["西",-OFF-5*f,0]].forEach(([t,x,z]) => { const sp=textSprite(t,big,"#ffe9a8"); sp.position.set(x,big/2,z); labelGroup.add(sp); });
+  [["北",0,-OFF-3*f],["南",0,OFF+4.5*f],["東",OFF+3*f,0],["西",-OFF-5*f,0]].forEach(([t,x,z]) => { const sp=textSprite(t,big,"#ffe9a8"); sp.position.set(x,big/2,z); compassGroup.add(sp); });
+  applyLabelVisibility();
 }
+
+function applyLabelVisibility(){
+  labelGroup.visible = $("showGrid").checked; compassGroup.visible = $("showCompass").checked;
+  store.set("kousha-labels", JSON.stringify({grid:$("showGrid").checked, compass:$("showCompass").checked}));
+}
+try{ const v=JSON.parse(store.get("kousha-labels")||"{}"); if(v.grid===false) $("showGrid").checked=false; if(v.compass===false) $("showCompass").checked=false; }catch(_){}
+$("showGrid").addEventListener("change", applyLabelVisibility);
+$("showCompass").addEventListener("change", applyLabelVisibility);
 
 // ---- 範囲で埋める ----
 let rangeA=null, rangeB=null, rangeNext="A";
