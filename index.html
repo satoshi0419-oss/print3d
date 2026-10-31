@@ -124,6 +124,10 @@ section{display:flex;flex-direction:column;gap:8px}
 .btn-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer}
 .teacher{border:1px solid var(--accent);border-radius:10px;padding:12px;gap:10px}
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--line);padding:3px;border-radius:10px;position:sticky;top:0;z-index:2}
+.tabs button{border:0;background:transparent;color:var(--fg);padding:9px 4px;border-radius:7px;font-weight:700;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.tabpanel{display:flex;flex-direction:column;gap:16px}
 .authors{font-size:13px;display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-variant-numeric:tabular-nums}
 .authors span:nth-child(even){text-align:right;color:var(--muted)}
 .bigcode{font-family:var(--display);font-size:30px;letter-spacing:.3em;text-align:center;padding:6px;border:1px dashed var(--line);border-radius:8px}
@@ -214,65 +218,81 @@ section{display:flex;flex-direction:column;gap:8px}
   </div>
 
   <aside class="panel">
-    <section class="teacher" id="teacherBox" hidden>
-      <div class="label">先生の設定</div>
-      <div class="bigcode" id="tCode">------</div>
-      <div class="row"><button class="btn" id="btnCopyLink">生徒用リンクをコピー</button><button class="btn" id="btnBackRooms">部屋一覧へ</button></div>
-      <div class="row"><label for="maxColors">使える色</label><select id="maxColors"><option value="2">2色</option><option value="3">3色</option><option value="4">4色</option><option value="8">8色</option></select></div>
-      <div class="row"><label for="mmPer">1ブロック =</label><input id="mmPer" type="number" min="1" max="30" step="0.5" value="5"><label>mm</label><input id="mPer" type="number" min="0.1" max="10" step="0.1" value="1"><label>m（実物）</label></div>
-      <label class="toggle"><input type="checkbox" id="lockRoom"> 生徒の操作を止める（ロック）</label>
-      <label class="toggle"><input type="checkbox" id="teacherFree"> 先生は範囲の制限なしで操作する（直すとき用）</label>
-      <div id="authorsBox"><div class="label">だれが何個</div><div class="authors" id="authors"></div></div>
-      <div class="btn-row"><button class="btn" id="btnSample">お手本を置く</button><button class="btn danger" id="btnClear">全部消す</button></div>
-    </section>
+    <!-- 先生・管理者・ひとりで試すときだけタブを出す。生徒は「作る」だけ -->
+    <div class="tabs" id="panelTabs" role="tablist" aria-label="メニュー">
+      <button role="tab" data-tab="make" aria-selected="true">作る</button><button role="tab" data-tab="teacher" aria-selected="false">先生</button><button role="tab" data-tab="export" aria-selected="false">書き出し</button>
+    </div>
 
-    <section>
-      <div class="label">道具（1〜4キー）</div>
-      <div class="seg" role="group" aria-label="道具">
-        <button id="mPlace" aria-pressed="true">置く</button><button id="mErase" aria-pressed="false">消す</button><button id="mPaint" aria-pressed="false">塗る</button><button id="mMove" aria-pressed="false">移動</button>
-      </div>
-    </section>
-    <section>
-      <div class="label">ブロックの色</div>
-      <div class="swatches" id="swatches"></div>
-    </section>
+    <!-- ===== 作る（全員） ===== -->
+    <div class="tabpanel" id="tabMake">
+      <section>
+        <div class="label">道具（1〜4キー）</div>
+        <div class="seg" role="group" aria-label="道具">
+          <button id="mPlace" aria-pressed="true">置く</button><button id="mErase" aria-pressed="false">消す</button><button id="mPaint" aria-pressed="false">塗る</button><button id="mMove" aria-pressed="false">移動</button>
+        </div>
+      </section>
+      <section>
+        <div class="label">ブロックの色</div>
+        <div class="swatches" id="swatches"></div>
+      </section>
+      <section>
+        <div class="label">ようす</div>
+        <dl class="stats"><dt>ブロック数</dt><dd id="sCount">0</dd></dl>
+        <div class="flag" id="floatFlag"><b id="floatCount">0</b><span></span></div>
+      </section>
+      <section>
+        <div class="label">表示</div>
+        <label class="toggle"><input type="checkbox" id="showTags" checked> 名前札を表示</label>
+        <label class="toggle" id="dummyRow"><input type="checkbox" id="showDummy"> ダミーの生徒を置く（確認用・自分の画面だけ）</label>
+      </section>
+      <section>
+        <div class="btn-row"><button class="btn" id="btnUndo">1つ戻す</button><button class="btn" id="btnLeave">部屋を出る</button></div>
+        <button class="btn" id="btnFbOpen">感想を送る</button>
+      </section>
+    </div>
 
-    <section>
-      <div class="label">表示</div>
-      <label class="toggle"><input type="checkbox" id="showTags" checked> 名前札を表示</label>
-      <label class="toggle"><input type="checkbox" id="showDummy"> ダミーの生徒を置く（確認用・自分の画面だけ）</label>
-    </section>
+    <!-- ===== 先生（先生・管理者） ===== -->
+    <div class="tabpanel" id="tabTeacher" hidden>
+      <section class="teacher" id="teacherBox">
+        <div class="label">部屋</div>
+        <div class="bigcode" id="tCode">------</div>
+        <div class="row"><button class="btn" id="btnCopyLink">生徒用リンクをコピー</button><button class="btn" id="btnBackRooms">部屋一覧へ</button></div>
+        <div class="label">生徒への設定</div>
+        <label class="toggle"><input type="checkbox" id="lockRoom"> 生徒の操作を止める（ロック）</label>
+        <label class="toggle" id="studentWarnRow"><input type="checkbox" id="studentWarn"> 生徒にも「浮いているブロック」の警告を見せる</label>
+        <div class="row"><label for="maxColors">使える色</label><select id="maxColors"><option value="2">2色</option><option value="3">3色</option><option value="4">4色</option><option value="8">8色</option></select></div>
+        <div class="row"><label for="mmPer">1ブロック =</label><input id="mmPer" type="number" min="1" max="30" step="0.5" value="5"><label>mm（印刷）</label></div>
+        <div class="row"><label for="mPer">1ブロック =</label><input id="mPer" type="number" min="0.1" max="10" step="0.1" value="1"><label>m（実物）</label></div>
+        <div id="authorsBox"><div class="label">だれが何個</div><div class="authors" id="authors"></div></div>
+        <div class="btn-row"><button class="btn" id="btnSample">お手本を置く</button><button class="btn danger" id="btnClear">全部消す</button></div>
+      </section>
+    </div>
 
-    <section>
-      <div class="label">模型のデータ</div>
-      <p class="small" id="scaleNote"></p>
-      <dl class="stats">
-        <dt>ブロック数</dt><dd id="sCount">0</dd>
-        <dt>幅 × 奥行 × 高さ</dt><dd id="sDims">—</dd>
-        <dt>印刷サイズ</dt><dd id="sMm">—</dd>
-        <dt>重さの目安（PLA）</dt><dd id="sWeight">—</dd>
-      </dl>
-      <div class="flag" id="floatFlag"><b id="floatCount">0</b><span></span></div>
-      <div class="flag" id="overFlag"><b id="overCount">0</b><span></span></div>
-      <div class="flag" id="swapFlag"><b id="swapCount">0</b><span></span></div>
-      <p class="small" id="swapNote"></p>
-      <label class="toggle"><input type="checkbox" id="showFloat" checked> 浮き（赤）と支えなし（橙）を色で表示</label>
-    </section>
-
-    <section>
-      <div class="label">書き出し</div>
-      <div class="row"><label for="fname">ファイル名</label><input id="fname" type="text" value="school"></div>
-      <label class="toggle"><input type="checkbox" id="fillExport" checked> 中を詰めて書き出す（サポート材いらず）</label>
-      <label class="toggle"><input type="checkbox" id="splitExport"> 色ごとに別々のSTL（zip）</label>
-      <button class="btn primary" id="btnStl">STLファイルを書き出す</button>
-      <div class="btn-row"><button class="btn" id="btnSave">JSON保存</button><button class="btn" id="btnLoad">JSON読み込み</button></div>
-      <input type="file" id="fileIn" accept=".json,application/json" hidden>
-    </section>
-
-    <section>
-      <div class="btn-row"><button class="btn" id="btnUndo">1つ戻す</button><button class="btn" id="btnLeave">部屋を出る</button></div>
-      <button class="btn" id="btnFbOpen">感想を送る</button>
-    </section>
+    <!-- ===== 書き出し（先生・管理者） ===== -->
+    <div class="tabpanel" id="tabExport" hidden>
+      <section>
+        <div class="label">模型のデータ</div>
+        <p class="small" id="scaleNote"></p>
+        <dl class="stats">
+          <dt>幅 × 奥行 × 高さ</dt><dd id="sDims">—</dd>
+          <dt>印刷サイズ</dt><dd id="sMm">—</dd>
+          <dt>重さの目安（PLA）</dt><dd id="sWeight">—</dd>
+        </dl>
+        <div class="flag" id="overFlag"><b id="overCount">0</b><span></span></div>
+        <div class="flag" id="swapFlag"><b id="swapCount">0</b><span></span></div>
+        <p class="small" id="swapNote"></p>
+        <label class="toggle"><input type="checkbox" id="showFloat" checked> 浮き（赤）と支えなし（橙）を色で表示</label>
+      </section>
+      <section>
+        <div class="label">書き出し</div>
+        <div class="row"><label for="fname">ファイル名</label><input id="fname" type="text" value="school"></div>
+        <label class="toggle"><input type="checkbox" id="fillExport" checked> 中を詰めて書き出す（サポート材いらず）</label>
+        <label class="toggle"><input type="checkbox" id="splitExport"> 色ごとに別々のSTL（zip）</label>
+        <button class="btn primary" id="btnStl">STLファイルを書き出す</button>
+        <div class="btn-row"><button class="btn" id="btnSave">JSON保存</button><button class="btn" id="btnLoad">JSON読み込み</button></div>
+        <input type="file" id="fileIn" accept=".json,application/json" hidden>
+      </section>
+    </div>
   </aside>
 </div>
 
@@ -515,20 +535,41 @@ $("fbShowDone").addEventListener("change", loadFeedback);
 // ============================================================
 // 部屋に入る / 出る
 // ============================================================
+// 役割: 生徒 / 先生 / 管理者 / ひとりで試す
+const isStudent = () => !!S.room && !S.isTeacher;
+const isAdmin = () => !!S.teacher?.is_admin;
+function selectTab(name){
+  for(const b of $("panelTabs").children) b.setAttribute("aria-selected", String(b.dataset.tab===name));
+  $("tabMake").hidden = name!=="make"; $("tabTeacher").hidden = name!=="teacher"; $("tabExport").hidden = name!=="export";
+}
+for(const b of $("panelTabs").children) b.addEventListener("click", () => selectTab(b.dataset.tab));
+function applyRole(){
+  const student = isStudent();
+  $("panelTabs").hidden = student;            // 生徒にはタブ自体を出さない（先生・書き出しの中身に触れない）
+  if(student) selectTab("make");
+  $("dummyRow").hidden = !isAdmin();
+  if(!isAdmin() && $("showDummy").checked){ $("showDummy").checked = false; applyDummy(); }
+  $("floatFlag").hidden = student && !S.settings.showWarnings;   // 生徒への警告は先生がオンにしたときだけ
+  setMode(mode); markDirty();
+}
+
 function applySettings(){
   const s = S.settings;
-  $("maxColors").value = String(s.maxColors); $("mmPer").value = s.mm; $("mPer").value = s.m; $("lockRoom").checked = s.locked;
+  $("maxColors").value = String(s.maxColors); $("mmPer").value = s.mm; $("mPer").value = s.m; $("lockRoom").checked = s.locked; $("studentWarn").checked = !!s.showWarnings;
   $("hudLock").hidden = !s.locked;
   [...$("swatches").children].forEach((b,i)=>{ b.hidden = i>=s.maxColors; });
   if(color>=s.maxColors) selectColor(0);
-  updateStats();
+  updateStats(); applyRole();
 }
 async function enterRoom(room){
   S.room = room;
-  S.settings = {maxColors:room.max_colors, mm:Number(room.mm_per_block), m:Number(room.m_per_block), locked:room.locked};
+  S.settings = {maxColors:room.max_colors, mm:Number(room.mm_per_block), m:Number(room.m_per_block), locked:room.locked, showWarnings:!!room.show_warnings};
   voxels = new Map(); authors = new Map(); history.length = 0;
   $("roomTitle").textContent = room.name; $("hudCode").textContent = room.code; $("hudCode").hidden=false; setRt("CONNECTING");
-  $("teacherBox").hidden = !S.isTeacher; $("tCode").textContent = room.code;
+  $("tCode").textContent = room.code; selectTab("make");
+  // 入室位置: 生徒は中央から少しずらす（全員が同じ場所に重ならないように）。先生は中央
+  if(S.isTeacher) cam.target.set(0,0,0); else cam.target.set(Math.round(Math.random()*12-6), 0, Math.round(Math.random()*12-6));
+  updateCamera();
   $("btnLeave").textContent = "部屋を出る";
   show("scrEditor"); applySettings(); markDirty(); applyDummy(); setMode("place");
   await connectRealtime();     // 先に購読してから読み込む（間に起きた変更を取りこぼさないため）
@@ -537,9 +578,9 @@ async function enterRoom(room){
 }
 function enterSolo(){
   S.room = null; S.isTeacher = false; S.nick = ""; authors = new Map(); history.length = 0;
-  S.settings = {maxColors:8, mm:5, m:1, locked:false};
-  $("roomTitle").textContent = "校舎ブロック工房（ひとりで試す）"; $("hudCode").hidden = true; $("hudRt").hidden = true; S.rtStatus = null; $("teacherBox").hidden = false; $("tCode").textContent="ひとり";
-  $("btnCopyLink").hidden = true; $("btnBackRooms").hidden = true; $("lockRoom").parentElement.hidden = true; $("teacherFree").parentElement.hidden = true; $("authorsBox").hidden = true;
+  S.settings = {maxColors:8, mm:5, m:1, locked:false, showWarnings:true};
+  $("roomTitle").textContent = "校舎ブロック工房（ひとりで試す）"; $("hudCode").hidden = true; $("hudRt").hidden = true; S.rtStatus = null; $("tCode").textContent="ひとり"; selectTab("make");
+  $("btnCopyLink").hidden = true; $("btnBackRooms").hidden = true; $("lockRoom").parentElement.hidden = true; $("studentWarnRow").hidden = true; $("authorsBox").hidden = true;
   $("btnLeave").textContent = "入口に戻る";
   if(!restoreSolo()) voxels = buildSample();
   show("scrEditor"); applySettings(); markDirty(); applyDummy();
@@ -547,7 +588,7 @@ function enterSolo(){
 async function leaveRoom(){
   if(S.channel){ await sb.removeChannel(S.channel); S.channel=null; }
   stopDummy(); peers.clear(); renderPeers(); clearPeerGhosts(); for(const n of notices.splice(0)){ n.el.remove(); scene.remove(n.box); }
-  $("btnCopyLink").hidden=false; $("btnBackRooms").hidden=false; $("lockRoom").parentElement.hidden=false; $("teacherFree").parentElement.hidden=false; $("authorsBox").hidden=false;
+  $("btnCopyLink").hidden=false; $("btnBackRooms").hidden=false; $("lockRoom").parentElement.hidden=false; $("studentWarnRow").hidden=false; $("authorsBox").hidden=false;
   const wasTeacher = S.isTeacher; S.room=null; S.rtStatus=null; $("hudRt").hidden=true;
   if(wasTeacher){ show("scrTeacher"); refreshAuth(); } else show("scrHome");
 }
@@ -709,14 +750,14 @@ async function bulkReplace(newMap){
 
 // 先生の設定変更 → DBに保存 → 全員に broadcast
 async function teacherSettingsChanged(){
-  S.settings = {maxColors:parseInt($("maxColors").value,10), mm:parseFloat($("mmPer").value)||5, m:parseFloat($("mPer").value)||1, locked:$("lockRoom").checked};
+  S.settings = {maxColors:parseInt($("maxColors").value,10), mm:parseFloat($("mmPer").value)||5, m:parseFloat($("mPer").value)||1, locked:$("lockRoom").checked, showWarnings:$("studentWarn").checked};
   applySettings();
   if(!S.room){ store.set("kousha-solo-settings", JSON.stringify(S.settings)); return; }
-  const {error} = await sb.from("rooms").update({max_colors:S.settings.maxColors, mm_per_block:S.settings.mm, m_per_block:S.settings.m, locked:S.settings.locked}).eq("id", S.room.id);
+  const {error} = await sb.from("rooms").update({max_colors:S.settings.maxColors, mm_per_block:S.settings.mm, m_per_block:S.settings.m, locked:S.settings.locked, show_warnings:S.settings.showWarnings}).eq("id", S.room.id);
   if(error){ toast("設定を保存できませんでした: "+error.message); return; }
   S.channel?.send({type:"broadcast", event:"settings", payload:S.settings});
 }
-for(const id of ["maxColors","mmPer","mPer","lockRoom"]) $(id).addEventListener("change", teacherSettingsChanged);
+for(const id of ["maxColors","mmPer","mPer","lockRoom","studentWarn"]) $(id).addEventListener("change", teacherSettingsChanged);
 
 // ============================================================
 // お手本（2階建ての校舎 + 体育館、3色）
@@ -848,8 +889,8 @@ const ghostGeo=new THREE.EdgesGeometry(new THREE.BoxGeometry(1.02,1.02,1.02));
 const ghost=new THREE.LineSegments(ghostGeo,new THREE.LineBasicMaterial({color:0x000000, transparent:true, opacity:0.7})); ghost.visible=false; scene.add(ghost);
 // ---- 手の届く範囲（生徒だけ）: 自分のいる場所（カメラが見ている地点）から半径 REACH ブロック ----
 const REACH = 8;
-// 生徒は常に、先生も「制限なし」にしない限り、白い円の中だけ操作できる
-const reachApplies = () => !!S.room && !(S.isTeacher && $("teacherFree").checked);
+// 生徒だけ、白い円の中で操作できる（先生・管理者はどこでも直せる）
+const reachApplies = () => isStudent();
 function inReach(i,j){ if(!reachApplies()) return true; const dx=(i+0.5-OFF)-cam.target.x, dz=(j+0.5-OFF)-cam.target.z; return dx*dx+dz*dz <= REACH*REACH; }
 const reachRing = new THREE.Group();
 { const mat = o => new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:o, depthWrite:false, fog:false});
@@ -960,11 +1001,10 @@ function applyDummy(){
 }
 function stopDummy(){ clearInterval(dummyTimer); dummyTimer=null; peers.delete(DUMMY_ID); }
 $("showDummy").addEventListener("change", applyDummy);
-$("teacherFree").addEventListener("change", () => setMode(mode));
 $("showTags").addEventListener("change", () => { $("avatars").hidden = !tagsOn(); syncPeerGhosts(); });
 
 function flyTo(cell){
-  const target=new THREE.Vector3(cell[0]-OFF+0.5, cell[2]+0.5, cell[1]-OFF+0.5);
+  const target=new THREE.Vector3(cell[0]-OFF+0.5, 0, cell[1]-OFF+0.5);   // 移動先も地面の点
   const from=cam.target.clone(), fromDist=cam.dist, toDist=Math.min(cam.dist,22), t0=performance.now();
   (function step(){ const k=Math.min(1,(performance.now()-t0)/450), e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
     cam.target.lerpVectors(from,target,e); cam.dist=fromDist+(toDist-fromDist)*e; updateCamera(); if(k<1) requestAnimationFrame(step); })();
@@ -979,7 +1019,8 @@ let floating=new Set(), overhang=new Set(), dirty=false;
 function markDirty(){ if(dirty) return; dirty=true; requestAnimationFrame(()=>{ dirty=false; rebuild(); }); }
 function rebuild(){
   floating=findFloating(voxels); overhang=findOverhang(voxels);
-  const showFloat=$("showFloat").checked, fillOn=$("fillExport").checked; // 詰めて書き出すなら「支えなし」は問題にならないので塗らない
+  const student=isStudent();
+  const showFloat=$("showFloat").checked && (!student || S.settings.showWarnings), fillOn=$("fillExport").checked || student; // 詰めて書き出すなら「支えなし」は問題にならないので塗らない
   const solid=(i,j,k)=> k<0 || voxels.has(key(i,j,k));   // 地面(k<0)も「詰まっている」扱い → 接地部分に影
   const faces=exposedFaces(voxels).filter(f=>!(f.f.n[2]===-1 && f.h===0)); // 地面に接している底面は見えないので描かない
   const pos=new Float32Array(faces.length*18), col=new Float32Array(faces.length*18), uv=new Float32Array(faces.length*12);
@@ -1017,11 +1058,18 @@ function restoreSolo(){
 }
 
 // ---- カメラ ----
-const cam={target:new THREE.Vector3(0,2,0),theta:Math.PI/4,phi:1.08,dist:40};
+// target = カメラが見ている地面の点（＝画面の中心＝白い点）。高さは常に 0
+const cam={target:new THREE.Vector3(0,0,0),theta:Math.PI/4,phi:1.08,dist:40};
 function updateCamera(){ const s=Math.sin(cam.phi); camera.position.set(cam.target.x+cam.dist*s*Math.sin(cam.theta), cam.target.y+cam.dist*Math.cos(cam.phi), cam.target.z+cam.dist*s*Math.cos(cam.theta)); camera.lookAt(cam.target); }
 function orbit(dx,dy){ cam.theta-=dx*0.006; cam.phi=Math.min(Math.PI/2-0.02,Math.max(0.15,cam.phi-dy*0.006)); updateCamera(); }
-function clampTarget(){ const L=OFF+2; cam.target.x=Math.max(-L,Math.min(L,cam.target.x)); cam.target.z=Math.max(-L,Math.min(L,cam.target.z)); cam.target.y=Math.max(0,Math.min(H,cam.target.y)); }
-function pan(dx,dy){ const right=new THREE.Vector3(), up=new THREE.Vector3(0,1,0); camera.getWorldDirection(right); right.cross(up).normalize(); const k=cam.dist*0.0016; cam.target.addScaledVector(right,-dx*k); cam.target.addScaledVector(up,dy*k); clampTarget(); updateCamera(); }
+function clampTarget(){ const L=OFF+2; cam.target.x=Math.max(-L,Math.min(L,cam.target.x)); cam.target.z=Math.max(-L,Math.min(L,cam.target.z)); cam.target.y=0; }
+// ずらす: 地図を引っぱるように、地面に沿って動かす（上下には動かさない）
+function pan(dx,dy){
+  const fwd=new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y=0; fwd.normalize();
+  const right=new THREE.Vector3().crossVectors(fwd,new THREE.Vector3(0,1,0)).normalize();
+  const k=cam.dist*0.0016, depth=1/Math.max(0.35,Math.cos(cam.phi));   // 奥行き方向は斜めに見ている分だけ多めに動かす
+  cam.target.addScaledVector(right,-dx*k); cam.target.addScaledVector(fwd,dy*k*depth); clampTarget(); updateCamera();
+}
 function zoom(f){ cam.dist=Math.min(140,Math.max(6,cam.dist*f)); updateCamera(); }
 
 // ---- 入力 ----
