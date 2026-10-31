@@ -221,6 +221,7 @@ section{display:flex;flex-direction:column;gap:8px}
       <div class="row"><label for="maxColors">使える色</label><select id="maxColors"><option value="2">2色</option><option value="3">3色</option><option value="4">4色</option><option value="8">8色</option></select></div>
       <div class="row"><label for="mmPer">1ブロック =</label><input id="mmPer" type="number" min="1" max="30" step="0.5" value="5"><label>mm</label><input id="mPer" type="number" min="0.1" max="10" step="0.1" value="1"><label>m（実物）</label></div>
       <label class="toggle"><input type="checkbox" id="lockRoom"> 生徒の操作を止める（ロック）</label>
+      <label class="toggle"><input type="checkbox" id="teacherFree"> 先生は範囲の制限なしで操作する（直すとき用）</label>
       <div id="authorsBox"><div class="label">だれが何個</div><div class="authors" id="authors"></div></div>
       <div class="btn-row"><button class="btn" id="btnSample">お手本を置く</button><button class="btn danger" id="btnClear">全部消す</button></div>
     </section>
@@ -538,7 +539,7 @@ function enterSolo(){
   S.room = null; S.isTeacher = false; S.nick = ""; authors = new Map(); history.length = 0;
   S.settings = {maxColors:8, mm:5, m:1, locked:false};
   $("roomTitle").textContent = "校舎ブロック工房（ひとりで試す）"; $("hudCode").hidden = true; $("hudRt").hidden = true; S.rtStatus = null; $("teacherBox").hidden = false; $("tCode").textContent="ひとり";
-  $("btnCopyLink").hidden = true; $("btnBackRooms").hidden = true; $("lockRoom").parentElement.hidden = true; $("authorsBox").hidden = true;
+  $("btnCopyLink").hidden = true; $("btnBackRooms").hidden = true; $("lockRoom").parentElement.hidden = true; $("teacherFree").parentElement.hidden = true; $("authorsBox").hidden = true;
   $("btnLeave").textContent = "入口に戻る";
   if(!restoreSolo()) voxels = buildSample();
   show("scrEditor"); applySettings(); markDirty(); applyDummy();
@@ -546,7 +547,7 @@ function enterSolo(){
 async function leaveRoom(){
   if(S.channel){ await sb.removeChannel(S.channel); S.channel=null; }
   stopDummy(); peers.clear(); renderPeers(); clearPeerGhosts(); for(const n of notices.splice(0)){ n.el.remove(); scene.remove(n.box); }
-  $("btnCopyLink").hidden=false; $("btnBackRooms").hidden=false; $("lockRoom").parentElement.hidden=false; $("authorsBox").hidden=false;
+  $("btnCopyLink").hidden=false; $("btnBackRooms").hidden=false; $("lockRoom").parentElement.hidden=false; $("teacherFree").parentElement.hidden=false; $("authorsBox").hidden=false;
   const wasTeacher = S.isTeacher; S.room=null; S.rtStatus=null; $("hudRt").hidden=true;
   if(wasTeacher){ show("scrTeacher"); refreshAuth(); } else show("scrHome");
 }
@@ -847,7 +848,8 @@ const ghostGeo=new THREE.EdgesGeometry(new THREE.BoxGeometry(1.02,1.02,1.02));
 const ghost=new THREE.LineSegments(ghostGeo,new THREE.LineBasicMaterial({color:0x000000, transparent:true, opacity:0.7})); ghost.visible=false; scene.add(ghost);
 // ---- 手の届く範囲（生徒だけ）: 自分のいる場所（カメラが見ている地点）から半径 REACH ブロック ----
 const REACH = 8;
-const reachApplies = () => !!S.room && !S.isTeacher;
+// 生徒は常に、先生も「制限なし」にしない限り、白い円の中だけ操作できる
+const reachApplies = () => !!S.room && !(S.isTeacher && $("teacherFree").checked);
 function inReach(i,j){ if(!reachApplies()) return true; const dx=(i+0.5-OFF)-cam.target.x, dz=(j+0.5-OFF)-cam.target.z; return dx*dx+dz*dz <= REACH*REACH; }
 const reachRing = new THREE.Group();
 { const mat = o => new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:o, depthWrite:false, fog:false});
@@ -958,6 +960,7 @@ function applyDummy(){
 }
 function stopDummy(){ clearInterval(dummyTimer); dummyTimer=null; peers.delete(DUMMY_ID); }
 $("showDummy").addEventListener("change", applyDummy);
+$("teacherFree").addEventListener("change", () => setMode(mode));
 $("showTags").addEventListener("change", () => { $("avatars").hidden = !tagsOn(); syncPeerGhosts(); });
 
 function flyTo(cell){
