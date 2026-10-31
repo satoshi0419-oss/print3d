@@ -61,11 +61,11 @@ h1{font-size:22px} h2{font-size:18px}
 .topbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 
 /* ---- エディタ ---- */
-.app{height:100%;display:grid;grid-template-columns:1fr 320px;grid-template-rows:100%}
-.stage{position:relative;min-width:0;min-height:0;background:var(--canvas)}
+.app{height:100%;position:relative;overflow:hidden}
+.stage{position:absolute;inset:0;background:var(--canvas)}
 .stage canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}
 .hud{position:absolute;left:0;right:0;top:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;
-  padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:16px;pointer-events:none}
+  padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:calc(72px + env(safe-area-inset-right,0px));pointer-events:none}
 .hud>*{pointer-events:auto}
 .pill{font-size:12px;border-radius:999px;padding:3px 10px;background:var(--panel);border:1px solid var(--line);color:var(--muted)}
 .pill.code{font-family:var(--display);font-size:15px;letter-spacing:.2em;color:var(--fg)}
@@ -99,7 +99,7 @@ textarea{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radi
 .avatar .pin{width:2px;height:14px;background:var(--c)}
 .avatar.idle{opacity:.45}
 .notices{position:absolute;inset:0;pointer-events:none;overflow:hidden}
-.stage canvas.minimap{position:absolute;right:max(12px,env(safe-area-inset-right,0px));bottom:12px;width:160px;height:160px;border-radius:10px;border:2px solid var(--panel);box-shadow:0 2px 8px rgba(0,0,0,.3);background:#78ac4e;cursor:pointer;image-rendering:pixelated;touch-action:none}
+.stage canvas.minimap{position:absolute;right:max(12px,env(safe-area-inset-right,0px));top:calc(64px + env(safe-area-inset-top,0px));width:160px;height:160px;border-radius:10px;border:2px solid var(--panel);box-shadow:0 2px 8px rgba(0,0,0,.3);background:#78ac4e;cursor:pointer;image-rendering:pixelated;touch-action:none}
 @media (max-width:760px){.stage canvas.minimap{width:112px;height:112px}}
 .notice{position:absolute;transform:translate(-50%,-50%);background:var(--panel);color:var(--fg);border:1.5px solid var(--accent);border-radius:999px;padding:2px 10px;font-size:12px;font-weight:700;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.25);animation:noticeIn .25s ease-out}
 .notice.erase{border-color:var(--warn);color:var(--warn)}
@@ -107,12 +107,40 @@ textarea{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radi
 @media (prefers-reduced-motion:reduce){.notice{animation:none}}
 .peer{cursor:pointer}
 .peer:hover{border-color:var(--fg)}
-.hud h1{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:2px 12px;font-size:18px}
-.hint{position:absolute;left:0;bottom:0;background:color-mix(in srgb,var(--panel) 88%,transparent);border-top-right-radius:10px;color:var(--fg)!important;padding-block:6px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:16px;font-size:12px;color:var(--muted)}
-.toast{position:absolute;left:50%;bottom:36px;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%}
+.hud h1{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:2px 12px;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:min(520px,calc(100vw - 160px))}
+.hint{position:absolute;left:max(16px,env(safe-area-inset-left,0px));top:calc(90px + env(safe-area-inset-top,0px));max-width:calc(100% - 210px);background:color-mix(in srgb,var(--panel) 88%,transparent);border-radius:8px;color:var(--fg)!important;padding:4px 10px;font-size:12px;pointer-events:none}
+.toast{position:absolute;left:50%;bottom:calc(140px + env(safe-area-inset-bottom,0px));z-index:15;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%}
 .toast.show{opacity:.95}
-.panel{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;min-width:0;
-  padding-block:14px 24px;padding-left:16px;padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
+/* メニュー（引き出し）: ふだんは右の外に隠れていて、メニューボタンで出てくる */
+.panel{position:absolute;top:0;right:0;bottom:0;width:min(360px,92vw);z-index:30;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
+  padding-block:calc(12px + env(safe-area-inset-top,0px)) 24px;padding-left:16px;padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px;
+  transform:translateX(105%);transition:transform .22s ease;box-shadow:-8px 0 24px rgba(0,0,0,.18)}
+.app.menu-open .panel{transform:none}
+.panelhead{display:flex;justify-content:space-between;align-items:center}
+.panelhead h2{font-size:18px}
+.closebtn{border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+.menubtn{position:absolute;top:calc(10px + env(safe-area-inset-top,0px));right:max(12px,env(safe-area-inset-right,0px));z-index:25;display:flex;align-items:center;gap:6px;
+  border:0;border-radius:12px;padding:10px 14px;background:rgba(20,24,28,.62);color:#fff;font:inherit;font-weight:700;cursor:pointer;backdrop-filter:blur(4px)}
+.menubtn svg{width:20px;height:20px;stroke:currentColor;stroke-width:2.2;fill:none;stroke-linecap:round}
+/* ホットバー（いつも出ている）: 道具・色・1つ戻す。3Dの世界の上に重ねるので、テーマに関係なく暗い半透明 */
+.hotbar{position:absolute;left:0;right:0;margin-inline:auto;width:fit-content;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:10;
+  display:flex;flex-wrap:wrap;justify-content:center;align-items:stretch;gap:8px;padding:8px;border-radius:14px;background:rgba(20,24,28,.6);backdrop-filter:blur(4px);max-width:calc(100% - 24px)}
+.hb-group{display:flex;gap:4px}
+.hb-sep{width:1px;background:rgba(255,255,255,.25);margin:4px 2px}
+.tool{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:52px;height:52px;border-radius:9px;border:2px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#fff;cursor:pointer;font:inherit;font-size:10px;font-weight:700;padding:0}
+.tool svg{width:22px;height:22px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.tool[aria-pressed="true"]{border-color:#fff;background:rgba(255,255,255,.22)}
+.tool:disabled{opacity:.35;cursor:default}
+.hotbar .swatches{display:flex;gap:4px;padding:0}
+.hotbar .swatch{width:52px;height:52px;aspect-ratio:auto;border-radius:9px;border:3px solid rgba(255,255,255,.18);box-shadow:inset 0 -6px 0 rgba(0,0,0,.18)}
+.hotbar .swatch[aria-pressed="true"]{border-color:#fff;transform:translateY(-3px)}
+.hotbar .swatch span{display:none}
+.tool:focus-visible,.hotbar .swatch:focus-visible,.menubtn:focus-visible{outline:3px solid #ffe08a;outline-offset:2px}
+/* 範囲の入力欄（「範囲」を選んだときだけ、左下に浮かべる） */
+.floatcard[hidden]{display:none!important}
+.floatcard{position:absolute;left:max(12px,env(safe-area-inset-left,0px));bottom:calc(150px + env(safe-area-inset-bottom,0px));z-index:12;width:min(340px,calc(100% - 24px));max-height:calc(100% - 230px);overflow-y:auto;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;box-shadow:0 4px 16px rgba(0,0,0,.2);display:flex;flex-direction:column;gap:8px}
+.hudpill-float{color:var(--warn);border-color:var(--warn)}
 section{display:flex;flex-direction:column;gap:8px}
 .label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .seg{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;background:var(--line);padding:3px;border-radius:8px}
@@ -150,16 +178,18 @@ section{display:flex;flex-direction:column;gap:8px}
 .coordgrid{display:grid;grid-template-columns:auto 1fr 1fr 1fr;gap:6px;align-items:center;font-size:12px}
 .coordgrid b{font-weight:500;color:var(--muted);text-align:center}
 .coordgrid input{min-width:0;width:100%;padding:7px 4px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit;font-size:14px;text-align:center;font-variant-numeric:tabular-nums}
-.coord{position:absolute;left:max(16px,env(safe-area-inset-left,0px));bottom:38px;background:color-mix(in srgb,var(--panel) 90%,transparent);border-radius:8px;padding:3px 10px;font-size:13px;font-variant-numeric:tabular-nums;color:var(--fg);pointer-events:none}
+.coord{position:absolute;left:max(16px,env(safe-area-inset-left,0px));top:calc(56px + env(safe-area-inset-top,0px));background:color-mix(in srgb,var(--panel) 90%,transparent);border-radius:8px;padding:3px 10px;font-size:13px;font-variant-numeric:tabular-nums;color:var(--fg);pointer-events:none}
 .authors{font-size:13px;display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-variant-numeric:tabular-nums}
 .authors span:nth-child(even){text-align:right;color:var(--muted)}
 .bigcode{font-family:var(--display);font-size:30px;letter-spacing:.3em;text-align:center;padding:6px;border:1px dashed var(--line);border-radius:8px}
 @media (max-width:760px){
-  .app{grid-template-columns:1fr;grid-template-rows:50svh 1fr}
-  .panel{border-left:0;border-top:1px solid var(--line);padding-left:max(16px,env(safe-area-inset-left,0px))}
-  .hud{padding-right:max(16px,env(safe-area-inset-right,0px))}
   .roomrow{grid-template-columns:1fr;}
+  .tool,.hotbar .swatch{width:44px;height:44px}
+  .hint{display:none}
+  .floatcard{bottom:calc(196px + env(safe-area-inset-bottom,0px))}
+  .toast{bottom:calc(190px + env(safe-area-inset-bottom,0px))}
 }
+@media (prefers-reduced-motion:reduce){.panel{transition:none}}
 @media (prefers-reduced-motion:reduce){.toast{transition:none}}
 </style>
 </head>
@@ -236,31 +266,12 @@ section{display:flex;flex-direction:column;gap:8px}
       <span class="pill code" id="hudCode" hidden></span>
       <span class="pill lock" id="hudLock" hidden>ロック中</span>
       <span class="pill rt" id="hudRt" hidden>接続中…</span>
+      <span class="pill hudpill-float" id="hudFloat" hidden></span>
       <div class="peers" id="peers"></div>
     </div>
     <div class="hint" id="hint"></div>
     <div class="toast" id="toast"></div>
-  </div>
-
-  <aside class="panel">
-    <!-- 先生・管理者・ひとりで試すときだけタブを出す。生徒は「作る」だけ -->
-    <div class="tabs" id="panelTabs" role="tablist" aria-label="メニュー">
-      <button role="tab" data-tab="make" aria-selected="true">作る</button><button role="tab" data-tab="teacher" aria-selected="false">先生</button><button role="tab" data-tab="export" aria-selected="false">書き出し</button>
-    </div>
-
-    <!-- ===== 作る（全員） ===== -->
-    <div class="tabpanel" id="tabMake">
-      <section>
-        <div class="label">道具（1〜5キー）</div>
-        <div class="seg" role="group" aria-label="道具">
-          <button id="mPlace" aria-pressed="true">置く</button><button id="mErase" aria-pressed="false">消す</button><button id="mPaint" aria-pressed="false">塗る</button><button id="mRange" aria-pressed="false">範囲</button><button id="mMove" aria-pressed="false">移動</button>
-        </div>
-      </section>
-      <section>
-        <div class="label">ブロックの色</div>
-        <div class="swatches" id="swatches"></div>
-      </section>
-      <section id="rangeBox" hidden>
+    <div class="floatcard" id="rangeBox" hidden>
         <div class="label">範囲で埋める</div>
         <p class="small">作業台を2か所タップすると、その間が範囲になります。数字を直接変えることもできます。</p>
         <div class="coordgrid">
@@ -271,7 +282,27 @@ section{display:flex;flex-direction:column;gap:8px}
         <div class="row"><label for="rangeShape">形</label><select id="rangeShape"><option value="full">中まで全部</option><option value="hollow">外側だけ（中は空ける）</option><option value="walls">壁だけ（床・天井なし）</option></select></div>
         <p class="small" id="rangeInfo"></p>
         <div class="btn-row"><button class="btn primary" id="btnRangeFill">選んだ色で埋める</button><button class="btn" id="btnRangeClear">空にする</button></div>
-      </section>
+    </div>
+    <!-- ホットバー: いつも出ている（道具・ブロックの色・1つ戻す） -->
+    <div class="hotbar" id="hotbar">
+      <div class="hb-group" role="group" aria-label="道具"><button class="tool" id="mPlace" aria-pressed="true" title="置く（1キー）"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></svg><span>置く</span></button><button class="tool" id="mErase" aria-pressed="false" title="消す（2キー）"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9l6 6M15 9l-6 6"/></svg><span>消す</span></button><button class="tool" id="mPaint" aria-pressed="false" title="塗る（3キー）"><svg viewBox="0 0 24 24"><path d="M5 11l7-7 7 7-7 7z"/><path d="M19 15c1.2 1.6 1.8 2.7 1.8 3.5a1.8 1.8 0 0 1-3.6 0c0-.8.6-1.9 1.8-3.5z"/></svg><span>塗る</span></button><button class="tool" id="mRange" aria-pressed="false" title="範囲（4キー）"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1" stroke-dasharray="3 2.5"/><circle cx="4" cy="4" r="1.6"/><circle cx="20" cy="20" r="1.6"/></svg><span>範囲</span></button><button class="tool" id="mMove" aria-pressed="false" title="移動（5キー）"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg><span>移動</span></button></div>
+      <span class="hb-sep" aria-hidden="true"></span>
+      <div class="swatches" id="swatches" role="group" aria-label="ブロックの色"></div>
+      <span class="hb-sep" aria-hidden="true"></span>
+      <button class="tool" id="btnUndo" title="1つ戻す（Ctrl+Z）"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-4"/></svg><span>戻す</span></button>
+    </div>
+    <button class="menubtn" id="btnMenu" aria-expanded="false" aria-controls="panel"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>メニュー</button>
+  </div>
+
+  <aside class="panel" id="panel" aria-label="メニュー">
+    <div class="panelhead"><h2>メニュー</h2><button class="closebtn" id="btnMenuClose">閉じる</button></div>
+    <!-- 先生・管理者・ひとりで試すときだけタブを出す。生徒は「ようす」だけ -->
+    <div class="tabs" id="panelTabs" role="tablist" aria-label="メニュー">
+      <button role="tab" data-tab="make" aria-selected="true">ようす</button><button role="tab" data-tab="teacher" aria-selected="false">先生</button><button role="tab" data-tab="export" aria-selected="false">書き出し</button>
+    </div>
+
+    <!-- ===== ようす（全員） ===== -->
+    <div class="tabpanel" id="tabMake">
       <section>
         <div class="label">ようす</div>
         <dl class="stats"><dt>ブロック数</dt><dd id="sCount">0</dd></dl>
@@ -285,8 +316,7 @@ section{display:flex;flex-direction:column;gap:8px}
         <label class="toggle" id="dummyRow"><input type="checkbox" id="showDummy"> ダミーの生徒を置く（確認用・自分の画面だけ）</label>
       </section>
       <section>
-        <div class="btn-row"><button class="btn" id="btnUndo">1つ戻す</button><button class="btn" id="btnLeave">部屋を出る</button></div>
-        <button class="btn" id="btnFbOpen">感想を送る</button>
+        <div class="btn-row"><button class="btn" id="btnLeave">部屋を出る</button><button class="btn" id="btnFbOpen">感想を送る</button></div>
       </section>
     </div>
 
@@ -608,6 +638,14 @@ $("fbShowDone").addEventListener("change", loadFeedback);
 // ============================================================
 // 部屋に入る / 出る
 // ============================================================
+// ---- メニュー（引き出し）の開け閉め ----
+const isMenuOpen = () => $("scrEditor").classList.contains("menu-open");
+function openMenu(){ $("scrEditor").classList.add("menu-open"); $("btnMenu").setAttribute("aria-expanded","true"); }
+function closeMenu(){ $("scrEditor").classList.remove("menu-open"); $("btnMenu").setAttribute("aria-expanded","false"); if(exploded) updateExplode(); }
+$("btnMenu").addEventListener("click", () => isMenuOpen() ? closeMenu() : openMenu());
+$("btnMenuClose").addEventListener("click", closeMenu);
+document.addEventListener("keydown", e => { if(e.key==="Escape" && isMenuOpen() && $("fbOverlay").hidden) closeMenu(); });
+
 // 役割: 生徒 / 先生 / 管理者 / ひとりで試す
 const isStudent = () => !!S.room && !S.isTeacher;
 const isAdmin = () => !!S.teacher?.is_admin;
@@ -641,7 +679,7 @@ async function enterRoom(room){
   setWorldSize(room.size || 32); cuts = []; cutsAutoDone = false;
   replaceWorld(); authors = new Map(); history.length = 0;
   $("roomTitle").textContent = room.name; $("hudCode").textContent = room.code; $("hudCode").hidden=false; setRt("CONNECTING");
-  $("tCode").textContent = room.code; selectTab("make");
+  $("tCode").textContent = room.code; selectTab("make"); closeMenu();
   // 入室位置: 生徒は中央から少しずらす（全員が同じ場所に重ならないように）。先生は中央
   if(S.isTeacher) cam.target.set(0,0,0); else cam.target.set(Math.round(Math.random()*12-6), 0, Math.round(Math.random()*12-6));
   updateCamera();
@@ -654,7 +692,7 @@ async function enterRoom(room){
 function enterSolo(){
   S.room = null; S.isTeacher = false; S.nick = ""; authors = new Map(); history.length = 0;
   S.settings = {maxColors:8, mm:5, m:1, locked:false, showWarnings:true};
-  $("roomTitle").textContent = "校舎ブロック工房（ひとりで試す）"; $("hudCode").hidden = true; $("hudRt").hidden = true; S.rtStatus = null; $("tCode").textContent="ひとり"; selectTab("make");
+  $("roomTitle").textContent = "校舎ブロック工房（ひとりで試す）"; $("hudCode").hidden = true; $("hudRt").hidden = true; S.rtStatus = null; $("tCode").textContent="ひとり"; selectTab("make"); closeMenu();
   $("btnCopyLink").hidden = true; $("btnBackRooms").hidden = true; $("lockRoom").parentElement.hidden = true; $("studentWarnRow").hidden = true; $("authorsBox").hidden = true;
   $("btnLeave").textContent = "入口に戻る";
   setWorldSize(32); cuts = []; cutsAutoDone = false;
@@ -1411,7 +1449,7 @@ function updateGhost(cx,cy){
   ghost.material.color.set(mode!=="move" && !inReach(cell[0],cell[1]) ? 0xd94f3a : 0x000000);  // 届かない場所は赤い枠
 }
 canvas.addEventListener("contextmenu",e=>e.preventDefault());
-canvas.addEventListener("pointerdown",e=>{ canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+canvas.addEventListener("pointerdown",e=>{ if(isMenuOpen()){ closeMenu(); return; } canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pointers.size===1){ dragging=false; downPos={x:e.clientX,y:e.clientY}; downButton=e.button; }
   if(pointers.size===2){ const [a,b]=[...pointers.values()]; lastPinch=Math.hypot(a.x-b.x,a.y-b.y); lastMid={x:(a.x+b.x)/2,y:(a.y+b.y)/2}; dragging=true; } });
 canvas.addEventListener("pointermove",e=>{
@@ -1463,6 +1501,7 @@ function updateStats(){
   $("sWeight").innerHTML=n?`${fmt(vol*1.24)} <small>g${fill?"（詰めた場合）":""}</small>`:"—";
   $("scaleNote").textContent=`1ブロック = ${mm} mm（実物 ${m} m）。縮尺およそ 1 : ${Math.round(m*1000/mm).toLocaleString("ja-JP")}。`;
   const fl=$("floatFlag"); $("floatCount").textContent=floating.size; fl.classList.toggle("bad",floating.size>0);
+  $("hudFloat").hidden = fl.hidden || floating.size===0; $("hudFloat").textContent = `浮き ${floating.size}個`;
   fl.lastElementChild.textContent=floating.size?"個が地面につながっていません。印刷すると落ちます。":"浮いているブロックはありません";
   const of=$("overFlag"); $("overCount").textContent=overhang.size; of.classList.toggle("bad",overhang.size>0&&!fill);
   of.lastElementChild.textContent=overhang.size?(fill?"個は真下が空いていますが、詰めて書き出すので大丈夫です":"個は真下が空いています。サポート材が必要です"):"下に支えのないブロックはありません";
@@ -1579,7 +1618,7 @@ function refreshParts(){
 // 分解して見る: パーツを上下に離して表示（問題のあるブロックは赤）
 function updateExplode(){
   for(const m of [...previewGroup.children]){ m.geometry.dispose(); previewGroup.remove(m); }
-  exploded = $("explode").checked && !$("tabExport").hidden && !$("scrEditor").hidden;
+  exploded = $("explode").checked && !$("tabExport").hidden && !$("scrEditor").hidden && isMenuOpen();
   for(const m of chunkMeshes.values()) m.visible = !exploded;
   if(!exploded) return;
   const GAP = 3;
