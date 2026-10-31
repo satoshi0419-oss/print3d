@@ -107,7 +107,7 @@ textarea{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radi
   padding-block:14px 24px;padding-left:16px;padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
 section{display:flex;flex-direction:column;gap:8px}
 .label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-.seg{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:var(--line);padding:3px;border-radius:8px}
+.seg{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;background:var(--line);padding:3px;border-radius:8px}
 .seg button{border:0;background:transparent;color:var(--fg);padding:9px 4px;border-radius:6px;font-weight:500;cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:24px 8px;padding-bottom:18px}
@@ -130,6 +130,10 @@ section{display:flex;flex-direction:column;gap:8px}
 .tabs button{border:0;background:transparent;color:var(--fg);padding:9px 4px;border-radius:7px;font-weight:700;cursor:pointer}
 .tabs button[aria-selected="true"]{background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .tabpanel{display:flex;flex-direction:column;gap:16px}
+.coordgrid{display:grid;grid-template-columns:auto 1fr 1fr 1fr;gap:6px;align-items:center;font-size:12px}
+.coordgrid b{font-weight:500;color:var(--muted);text-align:center}
+.coordgrid input{min-width:0;width:100%;padding:7px 4px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit;font-size:14px;text-align:center;font-variant-numeric:tabular-nums}
+.coord{position:absolute;left:max(16px,env(safe-area-inset-left,0px));bottom:38px;background:color-mix(in srgb,var(--panel) 90%,transparent);border-radius:8px;padding:3px 10px;font-size:13px;font-variant-numeric:tabular-nums;color:var(--fg);pointer-events:none}
 .authors{font-size:13px;display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-variant-numeric:tabular-nums}
 .authors span:nth-child(even){text-align:right;color:var(--muted)}
 .bigcode{font-family:var(--display);font-size:30px;letter-spacing:.3em;text-align:center;padding:6px;border:1px dashed var(--line);border-radius:8px}
@@ -208,6 +212,7 @@ section{display:flex;flex-direction:column;gap:8px}
     <canvas id="c"></canvas>
     <div class="avatars" id="avatars"></div>
     <div class="notices" id="notices"></div>
+    <div class="coord" id="coord">X — ・ Y — ・ Z —</div>
     <canvas class="minimap" id="minimap" width="320" height="320" hidden title="タップでその場所へ移動"></canvas>
     <div class="hud">
       <h1 id="roomTitle">校舎ブロック工房</h1>
@@ -229,14 +234,26 @@ section{display:flex;flex-direction:column;gap:8px}
     <!-- ===== 作る（全員） ===== -->
     <div class="tabpanel" id="tabMake">
       <section>
-        <div class="label">道具（1〜4キー）</div>
+        <div class="label">道具（1〜5キー）</div>
         <div class="seg" role="group" aria-label="道具">
-          <button id="mPlace" aria-pressed="true">置く</button><button id="mErase" aria-pressed="false">消す</button><button id="mPaint" aria-pressed="false">塗る</button><button id="mMove" aria-pressed="false">移動</button>
+          <button id="mPlace" aria-pressed="true">置く</button><button id="mErase" aria-pressed="false">消す</button><button id="mPaint" aria-pressed="false">塗る</button><button id="mRange" aria-pressed="false">範囲</button><button id="mMove" aria-pressed="false">移動</button>
         </div>
       </section>
       <section>
         <div class="label">ブロックの色</div>
         <div class="swatches" id="swatches"></div>
+      </section>
+      <section id="rangeBox" hidden>
+        <div class="label">範囲で埋める</div>
+        <p class="small">作業台を2か所タップすると、その間が範囲になります。数字を直接変えることもできます。</p>
+        <div class="coordgrid">
+          <span></span><b>X（東西）</b><b>Y（高さ）</b><b>Z（南北）</b>
+          <span>はじめ</span><input id="r1x" type="number" inputmode="numeric" aria-label="はじめのX"><input id="r1y" type="number" inputmode="numeric" aria-label="はじめのY"><input id="r1z" type="number" inputmode="numeric" aria-label="はじめのZ">
+          <span>おわり</span><input id="r2x" type="number" inputmode="numeric" aria-label="おわりのX"><input id="r2y" type="number" inputmode="numeric" aria-label="おわりのY"><input id="r2z" type="number" inputmode="numeric" aria-label="おわりのZ">
+        </div>
+        <div class="row"><label for="rangeShape">形</label><select id="rangeShape"><option value="full">中まで全部</option><option value="hollow">外側だけ（中は空ける）</option><option value="walls">壁だけ（床・天井なし）</option></select></div>
+        <p class="small" id="rangeInfo"></p>
+        <div class="btn-row"><button class="btn primary" id="btnRangeFill">選んだ色で埋める</button><button class="btn" id="btnRangeClear">空にする</button></div>
       </section>
       <section>
         <div class="label">ようす</div>
@@ -640,22 +657,15 @@ async function loadAllBlocks(){
 }
 
 // ------------------------------------------------------------
-// Realtime: ①DBの変更(postgres_changes) ②今いる人(presence) ③カーソル・設定(broadcast)
+// Realtime: ①ブロックの変更(broadcast "blocks") ②今いる人(presence) ③カーソル・設定・お知らせ(broadcast)
 // ------------------------------------------------------------
 const peers = new Map(); // myId → {nick, hue, cell?, t}
 async function connectRealtime(){
   if(S.channel) await sb.removeChannel(S.channel);
-  S.joinedAt = Date.now();
+  S.joinedAt = Date.now(); S.rtWasUp = false;
   const ch = sb.channel(`room:${S.room.id}`, {config:{presence:{key:S.myId}, broadcast:{self:false}}});
-  ch.on("postgres_changes", {event:"*", schema:"public", table:"blocks", filter:`room_id=eq.${S.room.id}`}, payload => {
-    if(payload.eventType==="DELETE"){
-      const o = payload.old; if(o.x===undefined) return;
-      const k = key(o.x,o.y,o.z); voxels.delete(k); authors.delete(k);
-    }else{
-      const n = payload.new; const k = key(n.x,n.y,n.z); voxels.set(k, n.color); if(n.author) authors.set(k, n.author);
-    }
-    markDirty();
-  });
+  ch.on("broadcast", {event:"blocks"}, ({payload}) => applyRemoteBlocks(payload));
+  ch.on("broadcast", {event:"reload"}, () => loadAllBlocks());
   ch.on("presence", {event:"sync"}, () => {
     const state = ch.presenceState();
     const seen = new Set(); let newcomer = false;
@@ -688,6 +698,8 @@ async function connectRealtime(){
   ch.on("broadcast", {event:"settings"}, ({payload}) => { S.settings = payload; applySettings(); if(!S.isTeacher) toast(payload.locked ? "先生が操作を止めました" : "設定が変わりました"); });
   await ch.subscribe(async status => {
     setRt(status);
+    // 接続が切れて戻ったときは、その間の変更を取りこぼしているかもしれないので読み込み直す
+    if(status==="SUBSCRIBED"){ if(S.rtWasUp) loadAllBlocks(); S.rtWasUp = true; }
     if(status==="SUBSCRIBED") await ch.track({nick:S.nick, hue:hueOf(S.nick+S.myId), teacher:S.isTeacher, at:S.joinedAt, device:DEVICE_ID});
   });
   S.channel = ch;
@@ -730,10 +742,13 @@ function flushCursor(){
 async function remoteApply(changes){ // changes: [{k, before, after}]
   if(!S.room) return true;
   const ups = [], dels = [];
-  for(const c of changes){ const [x,y,z] = parse(c.k); if(c.after===null) dels.push({x,y,z}); else ups.push({room_id:S.room.id, x,y,z, color:c.after, author:S.nick}); }
+  for(const c of changes){ const [x,y,z] = parse(c.k); if(c.after===null) dels.push([x,y,z]); else ups.push({room_id:S.room.id, x,y,z, color:c.after, author:S.nick}); }
   let error = null;
-  if(ups.length){ const r = await sb.from("blocks").upsert(ups); error = r.error; }
-  for(const d of dels){ if(error) break; const r = await sb.from("blocks").delete().match({room_id:S.room.id, ...d}); error = r.error; }
+  for(let i=0; i<ups.length && !error; i+=1000){ const r = await sb.from("blocks").upsert(ups.slice(i,i+1000)); error = r.error; }
+  if(!error && dels.length){
+    const r = await sb.rpc("delete_blocks", {p_room:S.room.id, p_cells:dels});   // まとめて1回で消す
+    error = r.error || (r.data===0 && S.settings.locked && !S.isTeacher ? {message:"policy"} : null);
+  }
   if(error){
     for(const c of changes){ if(c.before===null) voxels.delete(c.k); else voxels.set(c.k, c.before); }
     markDirty();
@@ -742,6 +757,28 @@ async function remoteApply(changes){ // changes: [{k, before, after}]
   }
   return true;
 }
+// 変更を部屋の全員に知らせる。0.25秒分をまとめて1通にする（メッセージ数の節約）
+let outCells = [], outTimer = null;
+function sendBlocks(changes){
+  if(!S.channel) return;
+  for(const c of changes){ const [x,y,z] = parse(c.k); outCells.push([x,y,z,c.after]); }
+  if(!outTimer) outTimer = setTimeout(flushBlocks, 250);
+}
+function flushBlocks(){
+  outTimer = null; const cells = outCells; outCells = [];
+  if(!S.channel || !cells.length) return;
+  for(let i=0; i<cells.length; i+=1500) S.channel.send({type:"broadcast", event:"blocks", payload:{id:S.myId, nick:S.nick, cells:cells.slice(i,i+1500)}});
+}
+// 他の人の変更を受け取る（消した・塗り替えたのお知らせもここで出す）
+function applyRemoteBlocks(p){
+  const items = [];
+  for(const [x,y,z,c] of p.cells){
+    const k = key(x,y,z), before = voxels.get(k);
+    if(c===null){ if(before!==undefined){ voxels.delete(k); authors.delete(k); items.push({kind:"erase", cell:[x,y,z]}); } }
+    else { voxels.set(k,c); authors.set(k,p.nick); if(before!==undefined && before!==c) items.push({kind:"paint", cell:[x,y,z]}); }
+  }
+  if(items.length) showEditNotices({nick:p.nick, items});
+}
 const history = [];
 async function commit(changes){
   if(!changes.length) return;
@@ -749,18 +786,17 @@ async function commit(changes){
   for(const c of changes){
     if(c.after===null) voxels.delete(c.k); else voxels.set(c.k, c.after); if(S.room) authors.set(c.k, S.nick);
     lastEditAt = Date.now();
-    if(c.before!==null) queueEditNotice(c.after===null ? "erase" : "paint", c.k);
   }
   history.push(changes); if(history.length>60) history.shift();
   markDirty();
-  await remoteApply(changes);
+  if(await remoteApply(changes)) sendBlocks(changes);
 }
 async function undo(){
   const last = history.pop(); if(!last) return;
   const inverse = last.map(c => ({k:c.k, before:c.after, after:c.before}));
   for(const c of inverse){ if(c.after===null) voxels.delete(c.k); else voxels.set(c.k, c.after); }
   markDirty(); toast("1つ戻しました");
-  await remoteApply(inverse);
+  if(await remoteApply(inverse)) sendBlocks(inverse);
 }
 async function bulkReplace(newMap){
   if(!S.room){ history.push([...voxels].map(([k,c])=>({k,before:c,after:null})).concat([...newMap].map(([k,c])=>({k,before:null,after:c})))); replaceWorld(newMap); return; }
@@ -772,6 +808,7 @@ async function bulkReplace(newMap){
   for(let i=0;i<rows.length;i+=500){ const r = await sb.from("blocks").upsert(rows.slice(i,i+500)); if(r.error){ toast("送信エラー: "+r.error.message); break; } }
   for(const [k,c] of newMap){ voxels.set(k,c); authors.set(k,S.nick||"先生"); }
   markDirty();
+  S.channel?.send({type:"broadcast", event:"reload", payload:{}});   // 全員に「読み込み直して」と知らせる
 }
 
 // 先生の設定変更 → DBに保存 → 全員に broadcast
@@ -928,7 +965,7 @@ function setWorldSize(n){       // 作業台の広さを変える（地面・枠
   scene.fog.near=60+N*0.5; scene.fog.far=170+N*1.6;
   maxDist=Math.max(140, N*2.2); cam.dist=N<=32 ? 40 : Math.min(maxDist, N*0.75); updateCamera();
   $("minimap").hidden = N<=32;
-  miniBase=null;
+  miniBase=null; buildLabels(); rangeA=rangeB=null; rangeNext="A"; if(typeof updateRangePreview==="function") updateRangePreview();
 }
 const ghostGeo=new THREE.EdgesGeometry(new THREE.BoxGeometry(1.02,1.02,1.02));
 const ghost=new THREE.LineSegments(ghostGeo,new THREE.LineBasicMaterial({color:0x000000, transparent:true, opacity:0.7})); ghost.visible=false; scene.add(ghost);
@@ -949,6 +986,95 @@ function myPosCell(){
   return [i,j,0];
 }
 setInterval(() => { if(S.channel) sendCursor(myPosCell()); }, 1000);
+
+// ---- 座標と方角 ----
+// 画面に出す座標は Minecraft と同じ: X = 東西（東がプラス）、Y = 高さ、Z = 南北（南がプラス）。
+// プログラムの中の [i, j, h] は [X, Z, Y] の順なので、表示するときに入れ替える
+const fmtCell = c => `X ${c[0]} ・ Y ${c[2]} ・ Z ${c[1]}`;
+let lastHoverAt = 0;
+setInterval(() => {   // マウスを乗せていないとき（指で操作しているとき）は、自分のいる場所を出す
+  if(Date.now()-lastHoverAt < 1500 || $("scrEditor").hidden) return;
+  const p=myPosCell(); $("coord").textContent = `いる場所 X ${p[0]} ・ Z ${p[1]}`;
+}, 500);
+const labelGroup=new THREE.Group(); scene.add(labelGroup);
+function textSprite(text, size, color){
+  const c=document.createElement("canvas"), g=c.getContext("2d"); const fs=48;
+  g.font=`bold ${fs}px sans-serif`; const w=Math.ceil(g.measureText(text).width)+24; c.width=w; c.height=fs+20;
+  g.font=`bold ${fs}px sans-serif`; g.textAlign="center"; g.textBaseline="middle";
+  g.lineWidth=8; g.strokeStyle="rgba(25,40,25,.85)"; g.strokeText(text,w/2,c.height/2); g.fillStyle=color||"#fff"; g.fillText(text,w/2,c.height/2);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c), depthWrite:false, fog:false}));
+  sp.scale.set(size*w/c.height, size, 1); return sp;
+}
+function buildLabels(){
+  for(const sp of [...labelGroup.children]){ sp.material.map.dispose(); sp.material.dispose(); labelGroup.remove(sp); }
+  const f=Math.max(1, N/32), step=N<=32?8:16, s=1.1*f;
+  for(let v=0; v<=N; v+=step){
+    const xs=textSprite(`X${v}`, s); xs.position.set(Math.min(v,N-1)-OFF+0.5, s/2, OFF+1.8*f); labelGroup.add(xs);      // 南の端に X の目盛り
+    const zs=textSprite(`Z${v}`, s); zs.position.set(-OFF-2.2*f, s/2, Math.min(v,N-1)-OFF+0.5); labelGroup.add(zs);     // 西の端に Z の目盛り
+  }
+  const big=2.2*f;
+  [["北",0,-OFF-3*f],["南",0,OFF+4.5*f],["東",OFF+3*f,0],["西",-OFF-5*f,0]].forEach(([t,x,z]) => { const sp=textSprite(t,big,"#ffe9a8"); sp.position.set(x,big/2,z); labelGroup.add(sp); });
+}
+
+// ---- 範囲で埋める ----
+let rangeA=null, rangeB=null, rangeNext="A";
+const rangeBox3=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1,1,1)), new THREE.LineBasicMaterial({color:0x1f6fd0}));
+rangeBox3.visible=false; scene.add(rangeBox3);
+const clampCell = c => [Math.max(0,Math.min(N-1,c[0])), Math.max(0,Math.min(N-1,c[1])), Math.max(0,Math.min(H-1,c[2]))];
+const rangeLimit = () => isStudent() ? 100 : 20000;   // 一度に変えられる数（生徒は100個まで）
+function rangeBounds(){ if(!rangeA||!rangeB) return null; return {lo:[0,1,2].map(a=>Math.min(rangeA[a],rangeB[a])), hi:[0,1,2].map(a=>Math.max(rangeA[a],rangeB[a]))}; }
+function rangeFillCells(){
+  const r=rangeBounds(); if(!r) return []; const {lo,hi}=r, shape=$("rangeShape").value, out=[];
+  for(let i=lo[0];i<=hi[0];i++) for(let j=lo[1];j<=hi[1];j++) for(let h=lo[2];h<=hi[2];h++){
+    const ex=i===lo[0]||i===hi[0], ez=j===lo[1]||j===hi[1], ey=h===lo[2]||h===hi[2];
+    if(shape==="hollow" && !(ex||ez||ey)) continue;   // 外側だけ: 中は空ける
+    if(shape==="walls" && !(ex||ez)) continue;        // 壁だけ: 床と天井もなし
+    out.push([i,j,h]);
+  }
+  return out;
+}
+function rangeClearKeys(){ const r=rangeBounds(); if(!r) return []; const {lo,hi}=r, out=[];
+  for(const k of voxels.keys()){ const [i,j,h]=parse(k); if(i>=lo[0]&&i<=hi[0]&&j>=lo[1]&&j<=hi[1]&&h>=lo[2]&&h<=hi[2]) out.push(k); } return out; }
+function rangeInReach(){ const r=rangeBounds(); if(!r) return true; const {lo,hi}=r;
+  return [[lo[0],lo[1]],[hi[0],lo[1]],[lo[0],hi[1]],[hi[0],hi[1]]].every(([i,j])=>inReach(i,j)); }
+function setRangeInputs(){
+  const f=(id,v)=>{ $(id).value = v==null ? "" : v; };
+  f("r1x",rangeA?.[0]); f("r1y",rangeA?.[2]); f("r1z",rangeA?.[1]); f("r2x",rangeB?.[0]); f("r2y",rangeB?.[2]); f("r2z",rangeB?.[1]);
+  updateRangePreview();
+}
+function readRangeInputs(){
+  const g=id=>{ const v=parseInt($(id).value,10); return isNaN(v)?null:v; };
+  const a=[g("r1x"),g("r1z"),g("r1y")], b=[g("r2x"),g("r2z"),g("r2y")];
+  rangeA = a.every(v=>v!=null) ? clampCell(a) : null; rangeB = b.every(v=>v!=null) ? clampCell(b) : null;
+  updateRangePreview();
+}
+function updateRangePreview(){
+  const r=rangeBounds(), info=$("rangeInfo");
+  if(!r){ rangeBox3.visible=false; info.textContent = rangeA ? "おわりの場所をタップしてね" : "はじめの場所をタップしてね"; $("btnRangeFill").disabled=$("btnRangeClear").disabled=true; return; }
+  const {lo,hi}=r, sx=hi[0]-lo[0]+1, sy=hi[2]-lo[2]+1, sz=hi[1]-lo[1]+1;
+  rangeBox3.scale.set(sx+0.06, sy+0.06, sz+0.06); rangeBox3.position.set(lo[0]-OFF+sx/2, lo[2]+sy/2, lo[1]-OFF+sz/2);
+  rangeBox3.visible = mode==="range";
+  const nf=rangeFillCells().length, nc=rangeClearKeys().length, lim=rangeLimit(), reach=rangeInReach();
+  let msg=`${sx} × ${sy} × ${sz}（X×Y×Z）。埋めると ${nf.toLocaleString("ja-JP")} 個、空にすると ${nc.toLocaleString("ja-JP")} 個`;
+  if(!reach) msg+="。範囲が白い円からはみ出しています";
+  else if(nf>lim || nc>lim) msg+=`。一度に変えられるのは ${lim.toLocaleString("ja-JP")} 個までです`;
+  info.textContent=msg;
+  $("btnRangeFill").disabled = !reach || nf>lim || nf===0; $("btnRangeClear").disabled = !reach || nc>lim || nc===0;
+}
+async function rangeApply(fill){
+  updateRangePreview(); if($(fill?"btnRangeFill":"btnRangeClear").disabled) return;
+  const changes=[];
+  if(fill){ for(const [i,j,h] of rangeFillCells()){ const k=key(i,j,h), b=voxels.has(k)?voxels.get(k):null; if(b!==color) changes.push({k,before:b,after:color}); } }
+  else { for(const k of rangeClearKeys()) changes.push({k,before:voxels.get(k),after:null}); }
+  if(!changes.length){ toast("変わるブロックはありません"); return; }
+  await commit(changes);   // まとめて1回の操作。「1つ戻す」で全部まとめて戻せる
+  toast(fill ? `${changes.length.toLocaleString("ja-JP")}個埋めました` : `${changes.length.toLocaleString("ja-JP")}個空にしました`);
+  updateRangePreview();
+}
+for(const id of ["r1x","r1y","r1z","r2x","r2y","r2z"]) $(id).addEventListener("change", readRangeInputs);
+$("rangeShape").addEventListener("change", updateRangePreview);
+$("btnRangeFill").addEventListener("click", () => rangeApply(true));
+$("btnRangeClear").addEventListener("click", () => rangeApply(false));
 
 // ---- 仲間のいる場所: 足元にその人の色の丸 ----
 const peerGhosts=new Map(); // peerId → Mesh
@@ -1163,6 +1289,7 @@ function drawMini(){
   if(!miniBase) buildMiniBase();
   const W=mini.width, s=W/N, g=mini.getContext("2d");
   g.imageSmoothingEnabled=false; g.drawImage(miniBase,0,0,W,W);
+  g.font="bold 30px sans-serif"; g.textAlign="center"; g.textBaseline="top"; g.lineWidth=6; g.strokeStyle="rgba(0,0,0,.6)"; g.strokeText("北",W/2,6); g.fillStyle="#fff"; g.fillText("北",W/2,6);
   for(const p of peers.values()) if(p.cell){ g.fillStyle=`hsl(${p.hue} 60% 50%)`; g.beginPath(); g.arc((p.cell[0]+.5)*s,(p.cell[1]+.5)*s,8,0,7); g.fill(); g.strokeStyle="#fff"; g.lineWidth=2.5; g.stroke(); }
   const mx=(cam.target.x+OFF)*s, mz=(cam.target.z+OFF)*s;
   if(reachApplies()){ g.strokeStyle="rgba(255,255,255,.9)"; g.lineWidth=2; g.beginPath(); g.arc(mx,mz,REACH*s,0,7); g.stroke(); }
@@ -1213,6 +1340,12 @@ function act(cx,cy,forceErase){
   const hit=pick(cx,cy); if(!hit) return;
   const m=forceErase?"erase":mode;
   if(m==="move"){ const c=hit.existing||hit.target; if(inBounds(c[0],c[1],0)) flyTo(c); return; }
+  if(m==="range"){
+    const c = inBounds(...hit.target) ? hit.target : hit.existing; if(!c || !inBounds(...c)) return;
+    if(!inReach(c[0],c[1])){ toast("遠すぎて届きません。「移動」でその場所へ行ってね"); return; }
+    if(rangeNext==="A"){ rangeA=c; rangeB=null; rangeNext="B"; } else { rangeB=c; rangeNext="A"; }
+    setRangeInputs(); return;
+  }
   const cell = m==="place" ? hit.target : hit.existing;
   if(cell && !inReach(cell[0],cell[1])){ toast("遠すぎて届きません。「移動」でその場所へ行ってね"); return; }
   if(m==="place"){ const [i,j,k]=hit.target; if(!inBounds(i,j,k)){ toast("作業台の外には置けません"); return; } const kk=key(i,j,k); if(voxels.has(kk)) return; commit([{k:kk,before:null,after:color}]); }
@@ -1221,8 +1354,9 @@ function act(cx,cy,forceErase){
 }
 function updateGhost(cx,cy){
   const hit=pick(cx,cy);
-  const cell = hit ? (mode==="place"?hit.target:mode==="move"?(hit.existing||hit.target):hit.existing) : null;
+  const cell = hit ? ((mode==="place"||mode==="range")?hit.target:mode==="move"?(hit.existing||hit.target):hit.existing) : null;
   if(!cell||!inBounds(...cell)){ ghost.visible=false; return; }
+  lastHoverAt = Date.now(); $("coord").textContent = fmtCell(cell);
   ghost.visible=true; ghost.position.set(cell[0]-OFF+0.5,cell[2]+0.5,cell[1]-OFF+0.5);
   ghost.material.color.set(mode!=="move" && !inReach(cell[0],cell[1]) ? 0xd94f3a : 0x000000);  // 届かない場所は赤い枠
 }
@@ -1246,16 +1380,18 @@ canvas.addEventListener("pointerleave",()=>{ if(pointers.size===0) ghost.visible
 canvas.addEventListener("wheel",e=>{ e.preventDefault(); zoom(e.deltaY>0?1.1:0.9); },{passive:false});
 document.addEventListener("keydown",e=>{ if(["INPUT","SELECT","TEXTAREA"].includes(e.target.tagName)||$("scrEditor").hidden||!$("fbOverlay").hidden) return;
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); }
-  if(e.key==="1") setMode("place"); if(e.key==="2") setMode("erase"); if(e.key==="3") setMode("paint"); if(e.key==="4") setMode("move"); });
+  if(e.key==="1") setMode("place"); if(e.key==="2") setMode("erase"); if(e.key==="3") setMode("paint"); if(e.key==="4") setMode("range"); if(e.key==="5") setMode("move"); });
 
 // ---- パネル ----
-const modeBtns={place:"mPlace",erase:"mErase",paint:"mPaint",move:"mMove"};
+const modeBtns={place:"mPlace",erase:"mErase",paint:"mPaint",range:"mRange",move:"mMove"};
 function setMode(m){ mode=m; for(const [k,id] of Object.entries(modeBtns)) $(id).setAttribute("aria-pressed",String(k===m));
   const reach = reachApplies() ? "　白い円の中だけ届きます" : "";
   $("hint").textContent = m==="place" ? "タップ（クリック）で置く　ドラッグで回す　2本指（ホイール）で拡大"+reach
     : m==="erase" ? "ブロックをタップで消す（パソコンは右クリックでも消せます）"+reach
     : m==="paint" ? "ブロックをタップで選んだ色に塗る"+reach
-    : "行きたい場所をタップすると、そこへ移動します"; }
+    : m==="range" ? "2か所タップして範囲を決めます（はじめ → おわり）"+reach
+    : "行きたい場所をタップすると、そこへ移動します";
+  $("rangeBox").hidden = m!=="range"; rangeBox3.visible = m==="range" && !!rangeBounds(); if(m==="range") updateRangePreview(); }
 for(const [k,id] of Object.entries(modeBtns)) $(id).addEventListener("click",()=>setMode(k));
 setMode("place");
 const sw=$("swatches");
@@ -1316,7 +1452,7 @@ $("btnSample").addEventListener("click",()=>bulkReplace(buildSample()));
 // ---- 起動 ----
 function resize(){ const r=canvas.parentElement.getBoundingClientRect(); if(!r.width) return; renderer.setSize(r.width,r.height,false); camera.aspect=r.width/r.height; camera.updateProjectionMatrix(); }
 new ResizeObserver(resize).observe(canvas.parentElement);
-updateCamera(); worldReady = true;
+updateCamera(); buildLabels(); worldReady = true;
 (function loop(){ if(!$("scrEditor").hidden){ renderer.render(scene,camera); updateAvatars(); } requestAnimationFrame(loop); })();
 if(location.hash==="#teacher"){ show("scrTeacher"); refreshAuth(); }
 })();
