@@ -90,6 +90,11 @@ textarea{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radi
 .avatar .tag i{width:10px;height:10px;border-radius:50%;background:var(--c);display:inline-block}
 .avatar .pin{width:2px;height:14px;background:var(--c)}
 .avatar.idle{opacity:.45}
+.notices{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.notice{position:absolute;transform:translate(-50%,-50%);background:var(--panel);color:var(--fg);border:1.5px solid var(--accent);border-radius:999px;padding:2px 10px;font-size:12px;font-weight:700;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.25);animation:noticeIn .25s ease-out}
+.notice.erase{border-color:var(--warn);color:var(--warn)}
+@keyframes noticeIn{from{transform:translate(-50%,-30%);opacity:0}to{transform:translate(-50%,-50%);opacity:1}}
+@media (prefers-reduced-motion:reduce){.notice{animation:none}}
 .peer{cursor:pointer}
 .peer:hover{border-color:var(--fg)}
 .hud h1{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:2px 12px;font-size:18px}
@@ -100,7 +105,7 @@ textarea{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radi
   padding-block:14px 24px;padding-left:16px;padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
 section{display:flex;flex-direction:column;gap:8px}
 .label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--line);padding:3px;border-radius:8px}
+.seg{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:var(--line);padding:3px;border-radius:8px}
 .seg button{border:0;background:transparent;color:var(--fg);padding:9px 4px;border-radius:6px;font-weight:500;cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding-bottom:18px}
@@ -196,6 +201,7 @@ section{display:flex;flex-direction:column;gap:8px}
   <div class="stage" id="stage">
     <canvas id="c"></canvas>
     <div class="avatars" id="avatars"></div>
+    <div class="notices" id="notices"></div>
     <div class="hud">
       <h1 id="roomTitle">校舎ブロック工房</h1>
       <span class="pill code" id="hudCode" hidden></span>
@@ -220,9 +226,9 @@ section{display:flex;flex-direction:column;gap:8px}
     </section>
 
     <section>
-      <div class="label">道具（1・2・3キー）</div>
+      <div class="label">道具（1〜4キー）</div>
       <div class="seg" role="group" aria-label="道具">
-        <button id="mPlace" aria-pressed="true">置く</button><button id="mErase" aria-pressed="false">消す</button><button id="mPaint" aria-pressed="false">塗る</button>
+        <button id="mPlace" aria-pressed="true">置く</button><button id="mErase" aria-pressed="false">消す</button><button id="mPaint" aria-pressed="false">塗る</button><button id="mMove" aria-pressed="false">移動</button>
       </div>
     </section>
     <section>
@@ -337,6 +343,7 @@ async function joinAsStudent(){
   if(!sb){ err.textContent = "接続設定（config.js）がまだ空です。「ひとりで試す」は使えます。"; err.hidden=false; return; }
   if(code.length!==6){ err.textContent="部屋コードは6文字です"; err.hidden=false; return; }
   if(!nick){ err.textContent="ニックネームを入れてね"; err.hidden=false; return; }
+  if(/先生/.test(nick)){ err.textContent="「先生」が入った名前は使えません"; err.hidden=false; return; }
   const {data, error} = await sb.rpc("room_by_code", {p_code: code});
   if(error || !data || !data.length){ err.textContent="その部屋コードは見つかりません"; err.hidden=false; return; }
   store.set("kousha-nick", nick);
@@ -522,7 +529,7 @@ async function enterRoom(room){
   $("roomTitle").textContent = room.name; $("hudCode").textContent = room.code; $("hudCode").hidden=false; setRt("CONNECTING");
   $("teacherBox").hidden = !S.isTeacher; $("tCode").textContent = room.code;
   $("btnLeave").textContent = "部屋を出る";
-  show("scrEditor"); applySettings(); markDirty(); applyDummy();
+  show("scrEditor"); applySettings(); markDirty(); applyDummy(); setMode("place");
   await connectRealtime();     // 先に購読してから読み込む（間に起きた変更を取りこぼさないため）
   await loadAllBlocks();
   toast(S.isTeacher ? "先生として入りました" : `${S.nick} として入りました`);
@@ -538,7 +545,7 @@ function enterSolo(){
 }
 async function leaveRoom(){
   if(S.channel){ await sb.removeChannel(S.channel); S.channel=null; }
-  stopDummy(); peers.clear(); renderPeers(); clearPeerGhosts();
+  stopDummy(); peers.clear(); renderPeers(); clearPeerGhosts(); for(const n of notices.splice(0)){ n.el.remove(); scene.remove(n.box); }
   $("btnCopyLink").hidden=false; $("btnBackRooms").hidden=false; $("lockRoom").parentElement.hidden=false; $("authorsBox").hidden=false;
   const wasTeacher = S.isTeacher; S.room=null; S.rtStatus=null; $("hudRt").hidden=true;
   if(wasTeacher){ show("scrTeacher"); refreshAuth(); } else show("scrHome");
@@ -571,6 +578,7 @@ async function loadAllBlocks(){
 const peers = new Map(); // myId → {nick, hue, cell?, t}
 async function connectRealtime(){
   if(S.channel) await sb.removeChannel(S.channel);
+  S.joinedAt = Date.now();
   const ch = sb.channel(`room:${S.room.id}`, {config:{presence:{key:S.myId}, broadcast:{self:false}}});
   ch.on("postgres_changes", {event:"*", schema:"public", table:"blocks", filter:`room_id=eq.${S.room.id}`}, payload => {
     if(payload.eventType==="DELETE"){
@@ -587,18 +595,28 @@ async function connectRealtime(){
     for(const [id, metas] of Object.entries(state)){
       if(id===S.myId) continue; seen.add(id);
       const m = metas[metas.length-1];
-      const p = peers.get(id) || {}; peers.set(id, {...p, nick:m.nick, hue:m.hue, teacher:m.teacher});
+      const p = peers.get(id) || {}; peers.set(id, {...p, nick:m.nick, hue:m.hue, teacher:m.teacher, at:m.at});
     }
     for(const id of [...peers.keys()]) if(!seen.has(id) && id!==DUMMY_ID) peers.delete(id);
     renderPeers(); syncPeerGhosts();
+    // 同じニックネーム: 先に入っていた人（または先生）を優先し、あとから来た生徒は入口に戻す
+    if(S.room && !S.isTeacher && !S.kicking){
+      const me = S.nick.trim().toLowerCase();
+      const dup = [...peers.entries()].some(([id,p]) => id!==DUMMY_ID && (p.nick||"").trim().toLowerCase()===me && (p.teacher || (p.at||0) < S.joinedAt || ((p.at||0)===S.joinedAt && id < S.myId)));
+      if(dup){
+        S.kicking = true; const nick = S.nick;
+        leaveRoom().then(() => { S.kicking=false; const err=$("joinErr"); err.textContent=`「${nick}」はこの部屋でもう使われています。別のニックネームにしてね`; err.hidden=false; });
+      }
+    }
   });
   ch.on("broadcast", {event:"cursor"}, ({payload}) => {
-    const p = peers.get(payload.id); if(!p) return; p.cell = payload.cell; p.t = Date.now(); syncPeerGhosts();
+    const p = peers.get(payload.id); if(!p) return; p.cell = payload.cell; p.active = !!payload.active; p.t = Date.now(); syncPeerGhosts();
   });
+  ch.on("broadcast", {event:"edit"}, ({payload}) => showEditNotices(payload));
   ch.on("broadcast", {event:"settings"}, ({payload}) => { S.settings = payload; applySettings(); if(!S.isTeacher) toast(payload.locked ? "先生が操作を止めました" : "設定が変わりました"); });
   await ch.subscribe(async status => {
     setRt(status);
-    if(status==="SUBSCRIBED") await ch.track({nick:S.nick, hue:hueOf(S.nick+S.myId), teacher:S.isTeacher});
+    if(status==="SUBSCRIBED") await ch.track({nick:S.nick, hue:hueOf(S.nick+S.myId), teacher:S.isTeacher, at:S.joinedAt});
   });
   S.channel = ch;
 }
@@ -617,7 +635,8 @@ function renderPeers(){
 // Supabase Realtime は「1秒あたりのメッセージ数」に上限があり（無料100件/秒）、
 // 届いた人数分だけ数えられるため、40人が頻繁に送ると上限を超えて接続が切れる。
 const CURSOR_INTERVAL = 1000;
-let lastCursorSent = 0, lastCursorCell = "", pendingCursor = null, cursorTimer = null;
+let lastCursorSent = 0, lastCursorKey = "", pendingCursor = null, cursorTimer = null, lastEditAt = 0;
+// 送るのは「自分のいる場所」（カメラが見ている地点の、建物の上面）と「直近10秒に作業したか」
 function sendCursor(cell){
   if(!S.channel) return;
   pendingCursor = cell;
@@ -626,10 +645,11 @@ function sendCursor(cell){
 }
 function flushCursor(){
   cursorTimer = null;
-  const cell = pendingCursor, ck = cell ? cell.join(",") : "";
-  if(ck === lastCursorCell || !S.channel) return;
-  lastCursorSent = Date.now(); lastCursorCell = ck;
-  S.channel.send({type:"broadcast", event:"cursor", payload:{id:S.myId, cell}});
+  const cell = pendingCursor, active = Date.now() - lastEditAt < 10000;
+  const k = (cell ? cell.join(",") : "") + "|" + active;
+  if(k === lastCursorKey || !S.channel) return;
+  lastCursorSent = Date.now(); lastCursorKey = k;
+  S.channel.send({type:"broadcast", event:"cursor", payload:{id:S.myId, cell, active}});
 }
 
 // ------------------------------------------------------------
@@ -654,7 +674,11 @@ const history = [];
 async function commit(changes){
   if(!changes.length) return;
   if(S.room && S.settings.locked && !S.isTeacher){ toast("先生がロック中です"); return; }
-  for(const c of changes){ if(c.after===null) voxels.delete(c.k); else voxels.set(c.k, c.after); if(S.room) authors.set(c.k, S.nick); }
+  for(const c of changes){
+    if(c.after===null) voxels.delete(c.k); else voxels.set(c.k, c.after); if(S.room) authors.set(c.k, S.nick);
+    lastEditAt = Date.now();
+    if(c.before!==null) queueEditNotice(c.after===null ? "erase" : "paint", c.k);
+  }
   history.push(changes); if(history.length>60) history.shift();
   markDirty();
   await remoteApply(changes);
@@ -817,14 +841,32 @@ border.rotation.x=-Math.PI/2; border.position.y=0.01; scene.add(border);
 const voxMesh=new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({map:blockTex, vertexColors:true})); scene.add(voxMesh);
 const ghostGeo=new THREE.EdgesGeometry(new THREE.BoxGeometry(1.02,1.02,1.02));
 const ghost=new THREE.LineSegments(ghostGeo,new THREE.LineBasicMaterial({color:0x000000, transparent:true, opacity:0.7})); ghost.visible=false; scene.add(ghost);
-const peerGhosts=new Map(); // peerId → LineSegments
+// ---- 手の届く範囲（生徒だけ）: 自分のいる場所（カメラが見ている地点）から半径 REACH ブロック ----
+const REACH = 8;
+const reachApplies = () => !!S.room && !S.isTeacher;
+function inReach(i,j){ if(!reachApplies()) return true; const dx=(i+0.5-OFF)-cam.target.x, dz=(j+0.5-OFF)-cam.target.z; return dx*dx+dz*dz <= REACH*REACH; }
+const reachRing = new THREE.Group();
+{ const mat = o => new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:o, depthWrite:false, fog:false});
+  const parts=[new THREE.Mesh(new THREE.RingGeometry(REACH-0.14, REACH, 96), mat(0.9)), new THREE.Mesh(new THREE.CircleGeometry(REACH, 96), mat(0.12)), new THREE.Mesh(new THREE.CircleGeometry(0.35, 32), mat(0.95))];
+  for(const m of parts){ m.rotation.x=-Math.PI/2; m.renderOrder=2; reachRing.add(m); } }
+reachRing.position.y=0.03; reachRing.visible=false; scene.add(reachRing);
+// 自分のいる場所のマス（その列の一番上のブロックの上）
+function myPosCell(){
+  const i=Math.floor(cam.target.x+OFF), j=Math.floor(cam.target.z+OFF);
+  for(let h=H-1; h>=0; h--) if(voxels.has(key(i,j,h))) return [i,j,h+1];
+  return [i,j,0];
+}
+setInterval(() => { if(S.channel) sendCursor(myPosCell()); }, 1000);
+
+// ---- 仲間のいる場所: 足元にその人の色の丸 ----
+const peerGhosts=new Map(); // peerId → Mesh
+const peerDiscGeo=new THREE.CircleGeometry(0.42, 32); peerDiscGeo.rotateX(-Math.PI/2);
 function syncPeerGhosts(){
-  const now=Date.now();
   for(const [id,p] of peers){
     let g=peerGhosts.get(id);
-    if(!g){ g=new THREE.LineSegments(ghostGeo,new THREE.LineBasicMaterial({color:new THREE.Color(`hsl(${p.hue},60%,55%)`)})); scene.add(g); peerGhosts.set(id,g); }
-    g.visible = tagsOn() && !!p.cell; g.material.opacity = now-(p.t||0) < 10000 ? 1 : 0.35; g.material.transparent = true;
-    if(p.cell) g.position.set(p.cell[0]-OFF+0.5, p.cell[2]+0.5, p.cell[1]-OFF+0.5);
+    if(!g){ g=new THREE.Mesh(peerDiscGeo,new THREE.MeshBasicMaterial({color:new THREE.Color(`hsl(${p.hue},60%,50%)`), transparent:true, depthWrite:false})); g.renderOrder=3; scene.add(g); peerGhosts.set(id,g); }
+    g.visible = tagsOn() && !!p.cell; g.material.opacity = p.active ? 0.95 : 0.45;
+    if(p.cell) g.position.set(p.cell[0]-OFF+0.5, p.cell[2]+0.04, p.cell[1]-OFF+0.5);
   }
   for(const [id,g] of peerGhosts) if(!peers.has(id)){ scene.remove(g); peerGhosts.delete(id); }
 }
@@ -835,6 +877,8 @@ const avatarEls = new Map(); // key(cell) → element
 const _v = new THREE.Vector3();
 function updateAvatars(){
   const box=$("avatars"); const r=canvas.getBoundingClientRect(); if(!r.width) return;
+  updateNotices(r);
+  reachRing.visible = reachApplies(); reachRing.position.x = cam.target.x; reachRing.position.z = cam.target.z;
   const now=Date.now(), groups=new Map();
   for(const p of peers.values()){ if(!p.cell) continue; const ck=p.cell.join(","); if(!groups.has(ck)) groups.set(ck,[]); groups.get(ck).push(p); }
   for(const [ck,el] of avatarEls) if(!groups.has(ck)){ el.remove(); avatarEls.delete(ck); }
@@ -843,7 +887,7 @@ function updateAvatars(){
     _v.set(i-OFF+0.5, h+1.05, j-OFF+0.5).project(camera);
     let el=avatarEls.get(ck);
     if(!el){ el=document.createElement("div"); el.className="avatar"; el.innerHTML='<span class="tag"><i></i><span class="n"></span></span><span class="pin"></span>'; box.appendChild(el); avatarEls.set(ck,el); }
-    const lead=ps[0], hue=lead.hue, idle = ps.every(p=>now-(p.t||0)>10000);
+    const lead=ps[0], hue=lead.hue, idle = ps.every(p=>!p.active);
     el.style.setProperty("--c",`hsl(${hue} 60% 50%)`);
     el.querySelector(".n").textContent = ps.length===1 ? lead.nick+(lead.teacher?"（先生）":"") : `${lead.nick} ほか${ps.length-1}人`;
     el.classList.toggle("idle", idle);
@@ -852,6 +896,45 @@ function updateAvatars(){
     el.style.left = ((_v.x+1)/2*r.width)+"px"; el.style.top = ((1-_v.y)/2*r.height)+"px";
   }
 }
+// ---- 消した・塗り替えたのお知らせ ----
+let editQueue=[], editTimer=null;
+function queueEditNotice(kind, k){
+  if(!S.channel) return;
+  editQueue.push({kind, cell:parse(k)});
+  if(!editTimer) editTimer=setTimeout(flushEdits, 800);   // 0.8秒分をまとめて1通で送る（メッセージ数の節約）
+}
+function flushEdits(){
+  editTimer=null; const items=editQueue.slice(0,20), total=editQueue.length; editQueue=[];
+  if(!items.length || !S.channel) return;
+  S.channel.send({type:"broadcast", event:"edit", payload:{id:S.myId, nick:S.nick, hue:hueOf(S.nick+S.myId), items, total}});
+}
+const notices=[]; // {el, cell, until, box}
+const flashMat=new THREE.LineBasicMaterial({color:0xd94f3a});
+function addNotice(cell, text, kind){
+  const el=document.createElement("div"); el.className="notice "+kind; el.textContent=text; $("notices").appendChild(el);
+  const box=new THREE.LineSegments(ghostGeo, kind==="erase"?flashMat:ghost.material); box.position.set(cell[0]-OFF+0.5, cell[2]+0.5, cell[1]-OFF+0.5); scene.add(box);
+  notices.push({el, cell, until:Date.now()+3000, box});
+  while(notices.length>12){ const n=notices.shift(); n.el.remove(); scene.remove(n.box); }
+}
+function showEditNotices(p){
+  for(const kind of ["erase","paint"]){
+    const cells=p.items.filter(it=>it.kind===kind).map(it=>it.cell); if(!cells.length) continue;
+    const verb = kind==="erase" ? "消した" : "塗り替えた";
+    if(cells.length<=3) cells.forEach(c => addNotice(c, `${p.nick} が${verb}`, kind));
+    else addNotice(cells[0], `${p.nick} が${cells.length}個${verb}`, kind);
+  }
+}
+function updateNotices(r){
+  const now=Date.now();
+  for(let n=notices.length-1; n>=0; n--){
+    const it=notices[n];
+    if(now>it.until){ it.el.remove(); scene.remove(it.box); notices.splice(n,1); continue; }
+    _v.set(it.cell[0]-OFF+0.5, it.cell[2]+1.4, it.cell[1]-OFF+0.5).project(camera);
+    it.el.style.display = _v.z>1 ? "none" : "";
+    it.el.style.left=((_v.x+1)/2*r.width)+"px"; it.el.style.top=((1-_v.y)/2*r.height)+"px";
+  }
+}
+
 // ---- ダミーの生徒（確認用）: 自分の画面だけ。送信もDB書き込みもしない ----
 const DUMMY_ID="__dummy__"; let dummyTimer=null;
 const tagsOn = () => $("showTags").checked;
@@ -860,7 +943,7 @@ function moveDummy(){
   const tops=[];
   for(const k of voxels.keys()){ const [i,j,h]=parse(k); if(!voxels.has(key(i,j,h+1)) && h+1<H) tops.push([i,j,h+1]); }
   p.cell = tops.length ? tops[Math.floor(Math.random()*tops.length)] : [OFF+Math.floor(Math.random()*6)-3, OFF+Math.floor(Math.random()*6)-3, 0];
-  p.t = Date.now(); syncPeerGhosts();
+  p.t = Date.now(); p.active = true; syncPeerGhosts();
 }
 function applyDummy(){
   if($("showDummy").checked){
@@ -930,7 +1013,8 @@ function restoreSolo(){
 const cam={target:new THREE.Vector3(0,2,0),theta:Math.PI/4,phi:1.08,dist:40};
 function updateCamera(){ const s=Math.sin(cam.phi); camera.position.set(cam.target.x+cam.dist*s*Math.sin(cam.theta), cam.target.y+cam.dist*Math.cos(cam.phi), cam.target.z+cam.dist*s*Math.cos(cam.theta)); camera.lookAt(cam.target); }
 function orbit(dx,dy){ cam.theta-=dx*0.006; cam.phi=Math.min(Math.PI/2-0.02,Math.max(0.15,cam.phi-dy*0.006)); updateCamera(); }
-function pan(dx,dy){ const right=new THREE.Vector3(), up=new THREE.Vector3(0,1,0); camera.getWorldDirection(right); right.cross(up).normalize(); const k=cam.dist*0.0016; cam.target.addScaledVector(right,-dx*k); cam.target.addScaledVector(up,dy*k); updateCamera(); }
+function clampTarget(){ const L=OFF+2; cam.target.x=Math.max(-L,Math.min(L,cam.target.x)); cam.target.z=Math.max(-L,Math.min(L,cam.target.z)); cam.target.y=Math.max(0,Math.min(H,cam.target.y)); }
+function pan(dx,dy){ const right=new THREE.Vector3(), up=new THREE.Vector3(0,1,0); camera.getWorldDirection(right); right.cross(up).normalize(); const k=cam.dist*0.0016; cam.target.addScaledVector(right,-dx*k); cam.target.addScaledVector(up,dy*k); clampTarget(); updateCamera(); }
 function zoom(f){ cam.dist=Math.min(140,Math.max(6,cam.dist*f)); updateCamera(); }
 
 // ---- 入力 ----
@@ -948,15 +1032,19 @@ function pick(cx,cy){
 function act(cx,cy,forceErase){
   const hit=pick(cx,cy); if(!hit) return;
   const m=forceErase?"erase":mode;
+  if(m==="move"){ const c=hit.existing||hit.target; if(inBounds(c[0],c[1],0)) flyTo(c); return; }
+  const cell = m==="place" ? hit.target : hit.existing;
+  if(cell && !inReach(cell[0],cell[1])){ toast("遠すぎて届きません。「移動」でその場所へ行ってね"); return; }
   if(m==="place"){ const [i,j,k]=hit.target; if(!inBounds(i,j,k)){ toast("作業台の外には置けません"); return; } const kk=key(i,j,k); if(voxels.has(kk)) return; commit([{k:kk,before:null,after:color}]); }
   else if(m==="erase"){ if(!hit.existing) return; const kk=key(...hit.existing); if(!voxels.has(kk)) return; commit([{k:kk,before:voxels.get(kk),after:null}]); }
   else { if(!hit.existing) return; const kk=key(...hit.existing); if(!voxels.has(kk)||voxels.get(kk)===color) return; commit([{k:kk,before:voxels.get(kk),after:color}]); }
 }
 function updateGhost(cx,cy){
   const hit=pick(cx,cy);
-  const cell = hit ? (mode==="place"?hit.target:hit.existing) : null;
+  const cell = hit ? (mode==="place"?hit.target:mode==="move"?(hit.existing||hit.target):hit.existing) : null;
   if(!cell||!inBounds(...cell)){ ghost.visible=false; return; }
-  ghost.visible=true; ghost.position.set(cell[0]-OFF+0.5,cell[2]+0.5,cell[1]-OFF+0.5); sendCursor(cell);
+  ghost.visible=true; ghost.position.set(cell[0]-OFF+0.5,cell[2]+0.5,cell[1]-OFF+0.5);
+  ghost.material.color.set(mode!=="move" && !inReach(cell[0],cell[1]) ? 0xd94f3a : 0x000000);  // 届かない場所は赤い枠
 }
 canvas.addEventListener("contextmenu",e=>e.preventDefault());
 canvas.addEventListener("pointerdown",e=>{ canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
@@ -978,12 +1066,16 @@ canvas.addEventListener("pointerleave",()=>{ if(pointers.size===0) ghost.visible
 canvas.addEventListener("wheel",e=>{ e.preventDefault(); zoom(e.deltaY>0?1.1:0.9); },{passive:false});
 document.addEventListener("keydown",e=>{ if(["INPUT","SELECT","TEXTAREA"].includes(e.target.tagName)||$("scrEditor").hidden||!$("fbOverlay").hidden) return;
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); }
-  if(e.key==="1") setMode("place"); if(e.key==="2") setMode("erase"); if(e.key==="3") setMode("paint"); });
+  if(e.key==="1") setMode("place"); if(e.key==="2") setMode("erase"); if(e.key==="3") setMode("paint"); if(e.key==="4") setMode("move"); });
 
 // ---- パネル ----
-const modeBtns={place:"mPlace",erase:"mErase",paint:"mPaint"};
+const modeBtns={place:"mPlace",erase:"mErase",paint:"mPaint",move:"mMove"};
 function setMode(m){ mode=m; for(const [k,id] of Object.entries(modeBtns)) $(id).setAttribute("aria-pressed",String(k===m));
-  $("hint").textContent = m==="place"?"クリックで置く　ドラッグで回す　ホイールで拡大　右ドラッグで移動　Ctrl+Z で戻す" : m==="erase"?"ブロックをクリックで消す（右クリックでも消せます）":"ブロックをクリックで選んだ色に塗る"; }
+  const reach = reachApplies() ? "　白い円の中だけ届きます" : "";
+  $("hint").textContent = m==="place" ? "タップ（クリック）で置く　ドラッグで回す　2本指（ホイール）で拡大"+reach
+    : m==="erase" ? "ブロックをタップで消す（パソコンは右クリックでも消せます）"+reach
+    : m==="paint" ? "ブロックをタップで選んだ色に塗る"+reach
+    : "行きたい場所をタップすると、そこへ移動します"; }
 for(const [k,id] of Object.entries(modeBtns)) $(id).addEventListener("click",()=>setMode(k));
 setMode("place");
 const sw=$("swatches");
