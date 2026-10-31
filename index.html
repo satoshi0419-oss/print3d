@@ -327,7 +327,9 @@ $("goHome").addEventListener("click", () => show("scrHome"));
 $("goHome2").addEventListener("click", () => show("scrHome"));
 $("btnSolo").addEventListener("click", () => enterSolo());
 $("btnJoin").addEventListener("click", joinAsStudent);
-$("joinNick").addEventListener("keydown", e => { if(e.key==="Enter") joinAsStudent(); });
+// 日本語入力の「変換の確定」の Enter では入室しない（isComposing = 変換中。keyCode 229 は古い Safari 向け）
+const isImeEnter = e => e.isComposing || e.keyCode === 229;
+$("joinNick").addEventListener("keydown", e => { if(e.key==="Enter" && !isImeEnter(e)) joinAsStudent(); });
 
 async function joinAsStudent(){
   const code = $("joinCode").value.trim(), nick = $("joinNick").value.trim();
@@ -368,7 +370,7 @@ async function login(){
   $("pw").value=""; refreshAuth();
 }
 $("btnLogin").addEventListener("click", login);
-$("pw").addEventListener("keydown", e => { if(e.key==="Enter") login(); });
+$("pw").addEventListener("keydown", e => { if(e.key==="Enter" && !isImeEnter(e)) login(); });
 // パスワード変更（ログイン中の本人のパスワードを Supabase Auth で書き換える）
 $("btnPwOpen").addEventListener("click", () => { $("pwBox").hidden = false; $("pwNew").focus(); });
 $("btnPwCancel").addEventListener("click", () => { $("pwBox").hidden = true; $("pwNew").value = $("pwNew2").value = ""; $("pwErr").hidden = true; });
