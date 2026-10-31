@@ -147,6 +147,10 @@ section{display:flex;flex-direction:column;gap:8px}
 .seg button{border:0;background:transparent;color:var(--fg);padding:9px 4px;border-radius:6px;font-weight:500;cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .seg.four{grid-template-columns:repeat(4,1fr)}
+.days{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.days button{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:8px;padding:8px 0;font:inherit;font-weight:700;cursor:pointer}
+.days button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.row input[type=time]{flex:1;min-width:0;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
 .authors .who{display:flex;flex-direction:column;min-width:0}
 .authors .who small{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
 #authors span.num{font-family:var(--display);font-size:16px;align-self:center;color:var(--fg)}
@@ -337,6 +341,17 @@ section{display:flex;flex-direction:column;gap:8px}
         <div class="row"><label for="maxColors">使える色</label><select id="maxColors"><option value="2">2色</option><option value="3">3色</option><option value="4">4色</option><option value="8">8色</option></select></div>
         <div class="row"><label for="mmPer">1ブロック =</label><input id="mmPer" type="number" min="1" max="30" step="0.5" value="5"><label>mm（印刷）</label></div>
         <div class="row"><label for="mPer">1ブロック =</label><input id="mPer" type="number" min="0.1" max="10" step="0.1" value="1"><label>m（実物）</label></div>
+        <div id="hoursBox">
+          <div class="label">生徒が入れる時間</div>
+          <label class="toggle"><input type="checkbox" id="hoursOn"> 入れる曜日と時刻を決める</label>
+          <div id="hoursDetail" hidden>
+            <div class="days" id="hoursDays" role="group" aria-label="入れる曜日">
+              <button data-d="1">月</button><button data-d="2">火</button><button data-d="3">水</button><button data-d="4">木</button><button data-d="5">金</button><button data-d="6">土</button><button data-d="0">日</button>
+            </div>
+            <div class="row"><input id="hoursFrom" type="time" aria-label="何時から"><span class="small">から</span><input id="hoursUntil" type="time" aria-label="何時まで"><span class="small">まで</span></div>
+            <p class="small" id="hoursNote"></p>
+          </div>
+        </div>
         <div id="authorsBox">
           <div class="label">だれが何をしたか</div>
           <div class="seg four" id="authorMetric" role="group" aria-label="表示する数">
@@ -483,6 +498,7 @@ async function joinAsStudent(){
   if(/先生/.test(nick)){ err.textContent="「先生」が入った名前は使えません"; err.hidden=false; return; }
   const {data, error} = await sb.rpc("room_by_code", {p_code: code});
   if(error || !data || !data.length){ err.textContent="その部屋コードは見つかりません"; err.hidden=false; return; }
+  if(data[0].in_hours===false){ err.textContent=`この部屋に入れるのは「${scheduleText(scheduleFromRoom(data[0]))}」です`; err.hidden=false; return; }
   store.set("kousha-nick", nick);
   S.nick = nick; S.isTeacher = false;
   await enterRoom({...data[0], code});
@@ -550,7 +566,7 @@ async function listRooms(){
     const row = document.createElement("div"); row.className="roomrow";
     const who = names.get(r.owner_id) || "（不明）";
     const school = S.teacher?.is_admin ? `${r.schools?.name || "学校なし"} ・ ` : "";
-    row.innerHTML = `<div><div>${esc(r.name)}</div><div class="meta">${esc(school)}作成: ${esc(who)} ・ ${r.size||32}マス ・ ${new Date(r.created_at).toLocaleDateString("ja-JP")} ・ ${r.locked?"ロック中":"開いている"}</div></div>
+    row.innerHTML = `<div><div>${esc(r.name)}</div><div class="meta">${esc(school)}作成: ${esc(who)} ・ ${r.size||32}マス ・ ${new Date(r.created_at).toLocaleDateString("ja-JP")} ・ ${r.locked?"ロック中":"開いている"} ・ 入れる時間: ${esc(scheduleText(scheduleFromRoom(r)))}</div></div>
       <span class="code">${r.code}</span><div class="row"><button class="btn primary">開く</button><button class="btn danger">削除</button></div>`;
     const [open, del] = row.querySelectorAll("button");
     open.addEventListener("click", async () => { S.nick=S.teacher?.display_name || "先生"; S.isTeacher=true; await enterRoom(r); });
@@ -679,9 +695,39 @@ function applyRole(){
   setMode(mode); rebuildAll();
 }
 
+// ---- 入れる時間帯 ----
+// schedule = {days:[1,2,3,4,5], from:"08:30", until:"15:30"}（null なら制限なし）。曜日は 0=日 … 6=土
+const DAY_NAMES = ["日","月","火","水","木","金","土"];
+function scheduleFromRoom(r){
+  if(!r.open_from || !r.open_until) return null;
+  return {days: r.open_days || [0,1,2,3,4,5,6], from: String(r.open_from).slice(0,5), until: String(r.open_until).slice(0,5)};
+}
+function scheduleText(sc){
+  if(!sc) return "いつでも";
+  const d = [...sc.days].sort((a,b)=>((a+6)%7)-((b+6)%7));
+  const wk = d.join()==="1,2,3,4,5" ? "平日" : d.length===7 ? "毎日" : d.map(x=>DAY_NAMES[x]).join("・");
+  return `${wk} ${sc.from}〜${sc.until}`;
+}
+function tokyoNow(){   // 端末の時刻を日本時間の「曜日」と「時:分」にする
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Tokyo", weekday:"short", hour:"2-digit", minute:"2-digit", hour12:false}).formatToParts(new Date()).map(p=>[p.type,p.value]));
+  return {dow: ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].indexOf(parts.weekday), hm: `${parts.hour==="24"?"00":parts.hour}:${parts.minute}`};
+}
+function inSchedule(sc){ if(!sc) return true; const t = tokyoNow(); return sc.days.includes(t.dow) && t.hm >= sc.from && t.hm <= sc.until; }
+// 生徒が部屋にいる間、30秒ごとに時間を確かめ、時間外になったら入口に戻す
+setInterval(async () => {
+  if(!S.room || S.isTeacher || inSchedule(S.settings.schedule)) return;
+  const sc = S.settings.schedule; await leaveRoom();
+  const err=$("joinErr"); err.textContent = `使える時間が終わりました（${scheduleText(sc)}）`; err.hidden=false;
+}, 30000);
+
 function applySettings(){
   const s = S.settings;
   $("maxColors").value = String(s.maxColors); $("mmPer").value = s.mm; $("mPer").value = s.m; $("lockRoom").checked = s.locked; $("studentWarn").checked = !!s.showWarnings;
+  const sc = s.schedule; $("hoursOn").checked = !!sc; $("hoursDetail").hidden = !sc;
+  const days = sc ? sc.days : [1,2,3,4,5];
+  for(const b of $("hoursDays").children) b.setAttribute("aria-pressed", String(days.includes(+b.dataset.d)));
+  $("hoursFrom").value = sc ? sc.from : "08:30"; $("hoursUntil").value = sc ? sc.until : "15:30";
+  $("hoursNote").textContent = sc ? `生徒は「${scheduleText(sc)}」の間だけ入れます（日本時間）。先生はいつでも入れます。` : "";
   $("hudLock").hidden = !s.locked;
   [...$("swatches").children].forEach((b,i)=>{ b.hidden = i>=s.maxColors; });
   if(color>=s.maxColors) selectColor(0);
@@ -689,7 +735,7 @@ function applySettings(){
 }
 async function enterRoom(room){
   S.room = room;
-  S.settings = {maxColors:room.max_colors, mm:Number(room.mm_per_block), m:Number(room.m_per_block), locked:room.locked, showWarnings:!!room.show_warnings};
+  S.settings = {maxColors:room.max_colors, mm:Number(room.mm_per_block), m:Number(room.m_per_block), locked:room.locked, showWarnings:!!room.show_warnings, schedule:scheduleFromRoom(room)};
   setWorldSize(room.size || 32); cuts = []; cutsAutoDone = false; editSummary = new Map(); summaryAt = 0;
   replaceWorld(); authors = new Map(); history.length = 0;
   $("roomTitle").textContent = room.name; $("hudCode").textContent = room.code; $("hudCode").hidden=false; setRt("CONNECTING");
@@ -705,9 +751,9 @@ async function enterRoom(room){
 }
 function enterSolo(){
   S.room = null; S.isTeacher = false; S.nick = ""; authors = new Map(); history.length = 0;
-  S.settings = {maxColors:8, mm:5, m:1, locked:false, showWarnings:true};
+  S.settings = {maxColors:8, mm:5, m:1, locked:false, showWarnings:true, schedule:null};
   $("roomTitle").textContent = "校舎ブロック工房（ひとりで試す）"; $("hudCode").hidden = true; $("hudRt").hidden = true; S.rtStatus = null; $("tCode").textContent="ひとり"; selectTab("make"); closeMenu();
-  $("btnCopyLink").hidden = true; $("btnBackRooms").hidden = true; $("lockRoom").parentElement.hidden = true; $("studentWarnRow").hidden = true; $("authorsBox").hidden = true;
+  $("btnCopyLink").hidden = true; $("btnBackRooms").hidden = true; $("lockRoom").parentElement.hidden = true; $("studentWarnRow").hidden = true; $("authorsBox").hidden = true; $("hoursBox").hidden = true;
   $("btnLeave").textContent = "入口に戻る";
   setWorldSize(32); cuts = []; cutsAutoDone = false;
   if(!restoreSolo()) replaceWorld(buildSample());
@@ -717,7 +763,7 @@ async function leaveRoom(){
   await flushLog();
   if(S.channel){ await sb.removeChannel(S.channel); S.channel=null; }
   stopDummy(); peers.clear(); renderPeers(); clearPeerGhosts(); for(const n of notices.splice(0)){ n.el.remove(); scene.remove(n.box); }
-  $("btnCopyLink").hidden=false; $("btnBackRooms").hidden=false; $("lockRoom").parentElement.hidden=false; $("studentWarnRow").hidden=false; $("authorsBox").hidden=false;
+  $("btnCopyLink").hidden=false; $("btnBackRooms").hidden=false; $("lockRoom").parentElement.hidden=false; $("studentWarnRow").hidden=false; $("authorsBox").hidden=false; $("hoursBox").hidden=false;
   const wasTeacher = S.isTeacher; S.room=null; S.rtStatus=null; $("hudRt").hidden=true;
   if(wasTeacher){ show("scrTeacher"); refreshAuth(); } else show("scrHome");
 }
@@ -779,7 +825,8 @@ async function connectRealtime(){
     const p = peers.get(payload.id); if(!p) return; p.cell = payload.cell; p.active = !!payload.active; p.t = Date.now(); syncPeerGhosts();
   });
   ch.on("broadcast", {event:"edit"}, ({payload}) => showEditNotices(payload));
-  ch.on("broadcast", {event:"settings"}, ({payload}) => { S.settings = payload; applySettings(); if(!S.isTeacher) toast(payload.locked ? "先生が操作を止めました" : "設定が変わりました"); });
+  ch.on("broadcast", {event:"settings"}, ({payload}) => { S.settings = payload; applySettings();
+    if(!S.isTeacher && !inSchedule(payload.schedule)){ leaveRoom().then(() => { const err=$("joinErr"); err.textContent=`今は入れない時間になりました（${scheduleText(payload.schedule)}）`; err.hidden=false; }); return; } if(!S.isTeacher) toast(payload.locked ? "先生が操作を止めました" : "設定が変わりました"); });
   await ch.subscribe(async status => {
     setRt(status);
     // 接続が切れて戻ったときは、その間の変更を取りこぼしているかもしれないので読み込み直す
@@ -836,7 +883,7 @@ async function remoteApply(changes){ // changes: [{k, before, after}]
   if(error){
     for(const c of changes){ if(c.before===null) voxels.delete(c.k); else voxels.set(c.k, c.before); }
     markDirty();
-    toast(/row-level security|policy/i.test(error.message) ? "いまはロック中で置けません" : "送信できませんでした: "+error.message);
+    toast(/row-level security|policy/i.test(error.message) ? "いまは置けません（ロック中か、使える時間の外です）" : "送信できませんでした: "+error.message);
     return false;
   }
   return true;
@@ -914,14 +961,21 @@ async function bulkReplace(newMap){
 
 // 先生の設定変更 → DBに保存 → 全員に broadcast
 async function teacherSettingsChanged(){
-  S.settings = {maxColors:parseInt($("maxColors").value,10), mm:parseFloat($("mmPer").value)||5, m:parseFloat($("mPer").value)||1, locked:$("lockRoom").checked, showWarnings:$("studentWarn").checked};
+  const days = [...$("hoursDays").children].filter(b=>b.getAttribute("aria-pressed")==="true").map(b=>+b.dataset.d);
+  const schedule = $("hoursOn").checked && days.length && $("hoursFrom").value && $("hoursUntil").value && $("hoursFrom").value < $("hoursUntil").value
+    ? {days, from:$("hoursFrom").value, until:$("hoursUntil").value} : null;
+  if($("hoursOn").checked && !schedule) toast("曜日を1つ以上選び、「から」より「まで」を遅い時刻にしてください");
+  S.settings = {maxColors:parseInt($("maxColors").value,10), mm:parseFloat($("mmPer").value)||5, m:parseFloat($("mPer").value)||1, locked:$("lockRoom").checked, showWarnings:$("studentWarn").checked, schedule};
   applySettings();
   if(!S.room){ store.set("kousha-solo-settings", JSON.stringify(S.settings)); return; }
-  const {error} = await sb.from("rooms").update({max_colors:S.settings.maxColors, mm_per_block:S.settings.mm, m_per_block:S.settings.m, locked:S.settings.locked, show_warnings:S.settings.showWarnings}).eq("id", S.room.id);
+  const {error} = await sb.from("rooms").update({max_colors:S.settings.maxColors, mm_per_block:S.settings.mm, m_per_block:S.settings.m, locked:S.settings.locked, show_warnings:S.settings.showWarnings,
+    open_days:schedule?schedule.days:null, open_from:schedule?schedule.from:null, open_until:schedule?schedule.until:null}).eq("id", S.room.id);
   if(error){ toast("設定を保存できませんでした: "+error.message); return; }
   S.channel?.send({type:"broadcast", event:"settings", payload:S.settings});
 }
-for(const id of ["maxColors","mmPer","mPer","lockRoom","studentWarn"]) $(id).addEventListener("change", teacherSettingsChanged);
+for(const id of ["maxColors","mmPer","mPer","lockRoom","studentWarn","hoursFrom","hoursUntil"]) $(id).addEventListener("change", teacherSettingsChanged);
+$("hoursOn").addEventListener("change", () => { $("hoursDetail").hidden = !$("hoursOn").checked; teacherSettingsChanged(); });
+for(const b of $("hoursDays").children) b.addEventListener("click", () => { b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed")!=="true")); teacherSettingsChanged(); });
 
 // ============================================================
 // お手本（2階建ての校舎 + 体育館、3色）
