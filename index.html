@@ -146,6 +146,11 @@ section{display:flex;flex-direction:column;gap:8px}
 .seg{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;background:var(--line);padding:3px;border-radius:8px}
 .seg button{border:0;background:transparent;color:var(--fg);padding:9px 4px;border-radius:6px;font-weight:500;cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.seg.four{grid-template-columns:repeat(4,1fr)}
+.authors .who{display:flex;flex-direction:column;min-width:0}
+.authors .who small{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+#authors span.num{font-family:var(--display);font-size:16px;align-self:center;color:var(--fg)}
+#authors span.num.warn{color:var(--warn)}
 .swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:24px 8px;padding-bottom:18px}
 .swatch{aspect-ratio:1;border-radius:8px;border:2px solid transparent;cursor:pointer;padding:0;position:relative;max-width:100%}
 .swatch[aria-pressed="true"]{border-color:var(--fg)}
@@ -332,7 +337,15 @@ section{display:flex;flex-direction:column;gap:8px}
         <div class="row"><label for="maxColors">使える色</label><select id="maxColors"><option value="2">2色</option><option value="3">3色</option><option value="4">4色</option><option value="8">8色</option></select></div>
         <div class="row"><label for="mmPer">1ブロック =</label><input id="mmPer" type="number" min="1" max="30" step="0.5" value="5"><label>mm（印刷）</label></div>
         <div class="row"><label for="mPer">1ブロック =</label><input id="mPer" type="number" min="0.1" max="10" step="0.1" value="1"><label>m（実物）</label></div>
-        <div id="authorsBox"><div class="label">だれが何個</div><div class="authors" id="authors"></div></div>
+        <div id="authorsBox">
+          <div class="label">だれが何をしたか</div>
+          <div class="seg four" id="authorMetric" role="group" aria-label="表示する数">
+            <button data-m="now" aria-pressed="true">今ある</button><button data-m="placed" aria-pressed="false">置いた</button><button data-m="erased" aria-pressed="false">消した</button><button data-m="painted" aria-pressed="false">塗った</button>
+          </div>
+          <div class="row"><label for="authorSince">期間</label><select id="authorSince"><option value="today" selected>今日</option><option value="all">すべて</option></select><button class="btn" id="btnAuthorsReload">更新</button></div>
+          <div class="authors" id="authors"></div>
+          <p class="small" id="authorsNote"></p>
+        </div>
         <div class="btn-row"><button class="btn" id="btnSample">お手本を置く</button><button class="btn danger" id="btnClear">全部消す</button></div>
       </section>
     </div>
@@ -652,6 +665,7 @@ const isAdmin = () => !!S.teacher?.is_admin;
 function selectTab(name){
   for(const b of $("panelTabs").children) b.setAttribute("aria-selected", String(b.dataset.tab===name));
   $("tabMake").hidden = name!=="make"; $("tabTeacher").hidden = name!=="teacher"; $("tabExport").hidden = name!=="export";
+  if(name==="teacher" && S.isTeacher && S.room) loadEditSummary();
   if(name==="export"){ if(!cutsAutoDone){ cuts = suggestCuts(partSource()); cutsAutoDone = true; } refreshParts(); } else if(exploded) updateExplode();
 }
 for(const b of $("panelTabs").children) b.addEventListener("click", () => selectTab(b.dataset.tab));
@@ -676,7 +690,7 @@ function applySettings(){
 async function enterRoom(room){
   S.room = room;
   S.settings = {maxColors:room.max_colors, mm:Number(room.mm_per_block), m:Number(room.m_per_block), locked:room.locked, showWarnings:!!room.show_warnings};
-  setWorldSize(room.size || 32); cuts = []; cutsAutoDone = false;
+  setWorldSize(room.size || 32); cuts = []; cutsAutoDone = false; editSummary = new Map(); summaryAt = 0;
   replaceWorld(); authors = new Map(); history.length = 0;
   $("roomTitle").textContent = room.name; $("hudCode").textContent = room.code; $("hudCode").hidden=false; setRt("CONNECTING");
   $("tCode").textContent = room.code; selectTab("make"); closeMenu();
@@ -700,6 +714,7 @@ function enterSolo(){
   show("scrEditor"); applySettings(); markDirty(); applyDummy();
 }
 async function leaveRoom(){
+  await flushLog();
   if(S.channel){ await sb.removeChannel(S.channel); S.channel=null; }
   stopDummy(); peers.clear(); renderPeers(); clearPeerGhosts(); for(const n of notices.splice(0)){ n.el.remove(); scene.remove(n.box); }
   $("btnCopyLink").hidden=false; $("btnBackRooms").hidden=false; $("lockRoom").parentElement.hidden=false; $("studentWarnRow").hidden=false; $("authorsBox").hidden=false;
@@ -826,6 +841,23 @@ async function remoteApply(changes){ // changes: [{k, before, after}]
   }
   return true;
 }
+// 操作の記録: 置いた・消した・塗ったの数を数えておき、5秒ごとにまとめて1行書き込む（先生の「だれが何をしたか」用）
+let logAcc = {placed:0, erased:0, painted:0}, logTimer = null;
+function logEdits(changes){
+  if(!S.room) return;
+  for(const c of changes){
+    if(c.before===null && c.after!==null) logAcc.placed++;
+    else if(c.after===null && c.before!==null) logAcc.erased++;
+    else if(c.before!==c.after) logAcc.painted++;
+  }
+  if(!logTimer) logTimer = setTimeout(flushLog, 5000);
+}
+async function flushLog(){
+  clearTimeout(logTimer); logTimer = null;
+  const a = logAcc; logAcc = {placed:0, erased:0, painted:0};
+  if(!S.room || !sb || a.placed+a.erased+a.painted===0) return;
+  await sb.from("edit_log").insert({room_id:S.room.id, author:S.nick, ...a});   // 失敗しても作業は止めない
+}
 // 変更を部屋の全員に知らせる。0.25秒分をまとめて1通にする（メッセージ数の節約）
 let outCells = [], outTimer = null;
 function sendBlocks(changes){
@@ -858,14 +890,14 @@ async function commit(changes){
   }
   history.push(changes); if(history.length>60) history.shift();
   markDirty();
-  if(await remoteApply(changes)) sendBlocks(changes);
+  if(await remoteApply(changes)){ sendBlocks(changes); logEdits(changes); }
 }
 async function undo(){
   const last = history.pop(); if(!last) return;
   const inverse = last.map(c => ({k:c.k, before:c.after, after:c.before}));
   for(const c of inverse){ if(c.after===null) voxels.delete(c.k); else voxels.set(c.k, c.after); }
   markDirty(); toast("1つ戻しました");
-  if(await remoteApply(inverse)) sendBlocks(inverse);
+  if(await remoteApply(inverse)){ sendBlocks(inverse); logEdits(inverse); }
 }
 async function bulkReplace(newMap){
   if(!S.room){ history.push([...voxels].map(([k,c])=>({k,before:c,after:null})).concat([...newMap].map(([k,c])=>({k,before:null,after:c})))); replaceWorld(newMap); return; }
@@ -1515,9 +1547,38 @@ function updateStats(){
   $("swapNote").textContent=mixed.length?`混ざっている段: 下から ${mixed.join("、")} 段目。段ごとに1色にすると交換が激減します。`:"";
   $("btnUndo").disabled=history.length===0; $("btnStl").disabled=n===0;
   // だれが何個
-  if(S.isTeacher){ const cnt=new Map(); for(const k of voxels.keys()){ const a=authors.get(k)||"（不明）"; cnt.set(a,(cnt.get(a)||0)+1); }
-    $("authors").innerHTML=[...cnt].sort((a,b)=>b[1]-a[1]).map(([a,c])=>`<span>${esc(a)}</span><span>${c}</span>`).join("")||'<span class="small">まだブロックがありません</span>'; }
+  if(S.isTeacher) renderAuthors();
 }
+// ---- だれが何をしたか（先生用）----
+let authorMetric = "now", editSummary = new Map(), summaryAt = 0;
+async function loadEditSummary(){
+  if(!S.room || !S.isTeacher) return;
+  let since = null;
+  if($("authorSince").value==="today"){ const d=new Date(); d.setHours(0,0,0,0); since = d.toISOString(); }
+  const {data, error} = await sb.rpc("room_edit_summary", {p_room:S.room.id, p_since:since});
+  if(error){ $("authorsNote").textContent = "記録を読めませんでした: "+error.message; return; }
+  editSummary = new Map(data.map(r => [r.author, {placed:+r.placed, erased:+r.erased, painted:+r.painted}]));
+  summaryAt = Date.now(); renderAuthors();
+}
+function renderAuthors(){
+  const now = new Map(); for(const k of voxels.keys()){ const a=authors.get(k)||"（不明）"; now.set(a,(now.get(a)||0)+1); }
+  const names = new Set([...now.keys(), ...editSummary.keys()]);
+  const rows = [...names].map(n => { const e = editSummary.get(n) || {placed:0, erased:0, painted:0}; return {n, now:now.get(n)||0, ...e}; });
+  rows.sort((a,b) => b[authorMetric]-a[authorMetric] || a.n.localeCompare(b.n,"ja"));
+  // 消した数が、置いた数より多くて20個以上ある人は赤くする（いたずらの目安）
+  $("authors").innerHTML = rows.length ? rows.map(r => `<span class="who">${esc(r.n)}<small>今${r.now} ・ 置${r.placed} ・ 消${r.erased} ・ 塗${r.painted}</small></span><span class="num${r.erased>=20 && r.erased>r.placed ? " warn" : ""}">${r[authorMetric]}</span>`).join("")
+    : '<span class="small">まだ記録がありません</span>';
+  $("authorsNote").textContent = summaryAt ? `置いた・消した・塗ったは ${new Date(summaryAt).toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"})} 時点の記録（各端末から5秒ごとに届きます）` : "";
+}
+for(const b of $("authorMetric").children) b.addEventListener("click", () => {
+  authorMetric = b.dataset.m; for(const x of $("authorMetric").children) x.setAttribute("aria-pressed", String(x===b));
+  if(authorMetric!=="now" && Date.now()-summaryAt > 5000) loadEditSummary(); else renderAuthors();
+});
+$("authorSince").addEventListener("change", loadEditSummary);
+$("btnAuthorsReload").addEventListener("click", loadEditSummary);
+// 先生タブを開いている間は15秒ごとに読み直す
+setInterval(() => { if(S.isTeacher && S.room && isMenuOpen() && !$("tabTeacher").hidden) loadEditSummary(); }, 15000);
+
 function safeName(){ return ($("fname").value.trim()||"model").replace(/[\\/:*?"<>|]/g,"_"); }
 $("btnStl").addEventListener("click",()=>{
   const mm=S.settings.mm, src=$("fillExport").checked?filledVoxels(voxels):voxels;
