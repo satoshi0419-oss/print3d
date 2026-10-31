@@ -1,0 +1,12 @@
+{
+  "name": "校舎ブロック工房",
+  "short_name": "ブロック工房",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#9bd9ff",
+  "theme_color": "#9bd9ff",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
