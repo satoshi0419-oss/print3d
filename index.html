@@ -62,6 +62,25 @@ h1{font-size:22px} h2{font-size:18px}
 .pill{font-size:12px;border-radius:999px;padding:3px 10px;background:var(--panel);border:1px solid var(--line);color:var(--muted)}
 .pill.code{font-family:var(--display);font-size:15px;letter-spacing:.2em;color:var(--fg)}
 .pill.lock{color:var(--warn);border-color:var(--warn)}
+.pill.rt{display:inline-flex;align-items:center;gap:6px;color:var(--fg)}
+.pill.rt::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.pill.rt.ok::before{background:var(--ok)}
+.pill.rt.bad{color:var(--warn);border-color:var(--warn)} .pill.rt.bad::before{background:var(--warn)}
+.overlay{position:fixed;inset:0;z-index:50;background:rgba(20,22,24,.45);display:flex;align-items:center;justify-content:center;
+  padding-block:24px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.overlay .card{max-height:100%;overflow-y:auto}
+.chips{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.chips button{border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:8px;padding:8px 4px;cursor:pointer;font-weight:500}
+.chips button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+textarea{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);resize:vertical;min-width:0}
+.fblist{display:flex;flex-direction:column;gap:8px}
+.fbitem{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+.fbitem.done{opacity:.5}
+.fbitem .head{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.fbitem .cat{font-size:12px;border-radius:999px;padding:1px 8px;border:1px solid var(--line);color:var(--fg)}
+.fbitem .cat.bug{border-color:var(--warn);color:var(--warn)}
+.fbitem .msg{white-space:pre-wrap;overflow-wrap:anywhere}
+.fbitem .dev{font-size:12px;color:var(--muted)}
 .peers{display:flex;gap:6px;flex-wrap:wrap}
 .peer{display:inline-flex;align-items:center;gap:6px;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:2px 10px 2px 4px}
 .peer i{width:14px;height:14px;border-radius:4px;display:inline-block}
@@ -139,7 +158,7 @@ section{display:flex;flex-direction:column;gap:8px}
     <button class="link" id="goHome">生徒の入口に戻る</button>
   </div>
   <div class="card wide" id="roomsCard" hidden>
-    <div class="topbar"><span id="whoami" class="small"></span><div class="row"><button class="link" id="goHome2">生徒の入口</button><button class="link" id="btnPwOpen">パスワード変更</button><button class="link" id="btnLogout">ログアウト</button></div></div>
+    <div class="topbar"><span id="whoami" class="small"></span><div class="row"><button class="link" id="goHome2">生徒の入口</button><button class="link" id="btnFbOpen2">感想を送る</button><button class="link" id="btnPwOpen">パスワード変更</button><button class="link" id="btnLogout">ログアウト</button></div></div>
     <div class="pwbox" id="pwBox" hidden>
       <div class="field"><label for="pwNew">新しいパスワード（8文字以上）</label><input id="pwNew" type="password" autocomplete="new-password"></div>
       <div class="field"><label for="pwNew2">もう一度</label><input id="pwNew2" type="password" autocomplete="new-password"></div>
@@ -151,6 +170,24 @@ section{display:flex;flex-direction:column;gap:8px}
     <p class="small">1つの部屋＝1つの作品です。クラス全員で1つの校舎を作るなら部屋は1つで足ります。</p>
     <h2 id="roomsHeading">じぶんの部屋</h2>
     <div class="roomlist" id="roomList"></div>
+    <div id="fbAdmin" hidden>
+      <div class="topbar"><h2>届いた感想</h2><label class="toggle"><input type="checkbox" id="fbShowDone"> 対応済みも表示</label></div>
+      <div class="fblist" id="fbList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ====================== 感想を送る ====================== -->
+<div class="overlay" id="fbOverlay" hidden>
+  <div class="card" role="dialog" aria-labelledby="fbTitle">
+    <h2 id="fbTitle">感想を送る</h2>
+    <div class="chips" id="fbCats" role="group" aria-label="種類">
+      <button aria-pressed="true">不具合</button><button aria-pressed="false">使いにくい</button><button aria-pressed="false">要望</button><button aria-pressed="false">よかった</button>
+    </div>
+    <div class="field"><label for="fbMsg">内容</label><textarea id="fbMsg" maxlength="1000" rows="5" placeholder="例: iPadで2本指の拡大がしにくい / 30台目から反映が遅くなった"></textarea></div>
+    <p class="small">端末の種類（例: iPad / Safari）と接続状態も一緒に送られます。生徒の本名などの個人情報は書かないでください。</p>
+    <p class="err" id="fbErr" hidden></p>
+    <div class="btn-row"><button class="btn primary" id="fbSend">送る</button><button class="btn" id="fbCancel">やめる</button></div>
   </div>
 </div>
 
@@ -163,6 +200,7 @@ section{display:flex;flex-direction:column;gap:8px}
       <h1 id="roomTitle">校舎ブロック工房</h1>
       <span class="pill code" id="hudCode" hidden></span>
       <span class="pill lock" id="hudLock" hidden>ロック中</span>
+      <span class="pill rt" id="hudRt" hidden>接続中…</span>
       <div class="peers" id="peers"></div>
     </div>
     <div class="hint" id="hint"></div>
@@ -226,6 +264,7 @@ section{display:flex;flex-direction:column;gap:8px}
 
     <section>
       <div class="btn-row"><button class="btn" id="btnUndo">1つ戻す</button><button class="btn" id="btnLeave">部屋を出る</button></div>
+      <button class="btn" id="btnFbOpen">感想を送る</button>
     </section>
   </aside>
 </div>
@@ -317,6 +356,7 @@ async function refreshAuth(){
     $("whoami").textContent = me ? `${me.display_name}（${me.schools?.name || "学校未設定"}）${me.is_admin?" ・管理者":""}` : `${session.user.email}（学校未登録）`;
     $("roomsHeading").textContent = me?.is_admin ? "すべての学校の部屋" : me?.schools ? `${me.schools.name}の部屋` : "じぶんの部屋";
     await listRooms();
+    $("fbAdmin").hidden = !me?.is_admin; if(me?.is_admin) loadFeedback();
   }
 }
 async function login(){
@@ -379,6 +419,90 @@ async function listRooms(){
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 // ============================================================
+// 接続状態の表示（リアルタイム通信が学校のネットワークを通っているか）
+// ============================================================
+function setRt(status){
+  S.rtStatus = status;
+  const el=$("hudRt"); el.hidden=false; el.classList.remove("ok","bad");
+  if(status==="SUBSCRIBED"){ el.textContent="つながっています"; el.classList.add("ok"); }
+  else if(status==="CONNECTING"){ el.textContent="接続中…"; }
+  else { el.textContent="つながっていません"; el.classList.add("bad"); }  // CHANNEL_ERROR / TIMED_OUT / CLOSED
+}
+
+// ============================================================
+// 感想を送る（読めるのは管理者だけ）
+// ============================================================
+let fbCat="不具合", lastFbAt=0;
+function deviceSummary(){
+  const ua=navigator.userAgent;
+  const os = (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints>1)) ? "iPad" : /iPhone/.test(ua)?"iPhone" : /CrOS/.test(ua)?"Chromebook" : /Android/.test(ua)?"Android" : /Windows/.test(ua)?"Windows" : /Mac/.test(ua)?"Mac" : "その他";
+  const br = /Edg\//.test(ua)?"Edge" : /CriOS|Chrome\//.test(ua)?"Chrome" : /FxiOS|Firefox/.test(ua)?"Firefox" : /Safari/.test(ua)?"Safari" : "その他";
+  return `${os} / ${br} | ${ua}`.slice(0,300);
+}
+function openFeedback(){ $("fbErr").hidden=true; $("fbOverlay").hidden=false; $("fbMsg").focus(); }
+function closeFeedback(){ $("fbOverlay").hidden=true; }
+$("btnFbOpen").addEventListener("click", openFeedback);
+$("btnFbOpen2").addEventListener("click", openFeedback);
+$("fbCancel").addEventListener("click", closeFeedback);
+$("fbOverlay").addEventListener("click", e => { if(e.target.id==="fbOverlay") closeFeedback(); });
+document.addEventListener("keydown", e => { if(e.key==="Escape" && !$("fbOverlay").hidden) closeFeedback(); });
+[...$("fbCats").children].forEach(b => b.addEventListener("click", () => {
+  fbCat=b.textContent; [...$("fbCats").children].forEach(x=>x.setAttribute("aria-pressed", String(x===b)));
+}));
+$("fbSend").addEventListener("click", async () => {
+  const msg=$("fbMsg").value.trim(), err=$("fbErr"); err.hidden=true;
+  const fail = t => { err.textContent=t; err.hidden=false; };
+  if(!sb) return fail("接続設定（config.js）が空のため送れません");
+  if(!msg) return fail("内容を書いてください");
+  if(Date.now()-lastFbAt < 30000) return fail("続けて送るときは30秒あけてください");
+  const role = S.room ? (S.isTeacher?"teacher":"student") : (!$("scrTeacher").hidden ? "teacher" : "solo");
+  const row = {
+    room_id: S.room?.id ?? null,
+    school_id: role==="teacher" ? (S.teacher?.school_id ?? null) : null,
+    role, nick: (S.nick || S.teacher?.display_name || "").slice(0,30) || null,
+    category: fbCat, message: msg, device: deviceSummary(),
+    context: { blocks: voxels.size, people: peers.size, realtime: S.rtStatus, screen: `${innerWidth}x${innerHeight}`, touch: navigator.maxTouchPoints||0 },
+  };
+  $("fbSend").disabled = true;
+  const {error} = await sb.from("feedback").insert(row);   // 送った本人も読めないので .select() は付けない
+  $("fbSend").disabled = false;
+  if(error) return fail("送れませんでした: "+error.message);
+  lastFbAt = Date.now(); $("fbMsg").value=""; closeFeedback(); toast("感想を送りました。ありがとうございます");
+  if(S.teacher?.is_admin && !$("scrTeacher").hidden) loadFeedback();
+});
+
+// 管理者: 届いた感想の一覧
+async function loadFeedback(){
+  const box=$("fbList"); box.innerHTML='<p class="small">読み込み中…</p>';
+  let q = sb.from("feedback").select("*, rooms(name, code, schools(name)), schools(name)").order("created_at",{ascending:false}).limit(100);
+  if(!$("fbShowDone").checked) q = q.eq("resolved", false);
+  const {data, error} = await q;
+  if(error){ box.textContent = error.message; return; }
+  if(!data.length){ box.innerHTML = '<p class="small">まだ届いていません。</p>'; return; }
+  const roleName = {teacher:"先生", student:"生徒", solo:"ひとりで試す"};
+  box.innerHTML="";
+  for(const f of data){
+    const school = f.schools?.name || f.rooms?.schools?.name || "";
+    const where = f.rooms ? `${f.rooms.name}（${f.rooms.code}）` : "";
+    const dev = (f.device||"").split(" | ")[0];
+    const ctx = f.context||{};
+    const el=document.createElement("div"); el.className="fbitem"+(f.resolved?" done":"");
+    el.innerHTML = `<div class="head"><span class="cat${f.category==="不具合"?" bug":""}">${esc(f.category)}</span>
+        <span>${new Date(f.created_at).toLocaleString("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>
+        <span>${esc(school)}</span><span>${esc(where)}</span><span>${esc(roleName[f.role]||f.role)}${f.nick?"・"+esc(f.nick):""}</span></div>
+      <div class="msg">${esc(f.message)}</div>
+      <div class="dev">${esc(dev)} ・ 接続: ${esc(ctx.realtime||"—")} ・ 画面 ${esc(ctx.screen||"—")} ・ ブロック ${ctx.blocks??"—"} ・ 同じ部屋 ${ctx.people??"—"}人</div>
+      <div class="row"><button class="btn">${f.resolved?"未対応に戻す":"対応済みにする"}</button></div>`;
+    el.querySelector("button").addEventListener("click", async () => {
+      const {error} = await sb.from("feedback").update({resolved: !f.resolved}).eq("id", f.id);
+      if(error) toast("更新できませんでした: "+error.message); else loadFeedback();
+    });
+    box.appendChild(el);
+  }
+}
+$("fbShowDone").addEventListener("change", loadFeedback);
+
+// ============================================================
 // 部屋に入る / 出る
 // ============================================================
 function applySettings(){
@@ -393,7 +517,7 @@ async function enterRoom(room){
   S.room = room;
   S.settings = {maxColors:room.max_colors, mm:Number(room.mm_per_block), m:Number(room.m_per_block), locked:room.locked};
   voxels = new Map(); authors = new Map(); history.length = 0;
-  $("roomTitle").textContent = room.name; $("hudCode").textContent = room.code; $("hudCode").hidden=false;
+  $("roomTitle").textContent = room.name; $("hudCode").textContent = room.code; $("hudCode").hidden=false; setRt("CONNECTING");
   $("teacherBox").hidden = !S.isTeacher; $("tCode").textContent = room.code;
   $("btnLeave").textContent = "部屋を出る";
   show("scrEditor"); applySettings(); markDirty(); applyDummy();
@@ -404,7 +528,7 @@ async function enterRoom(room){
 function enterSolo(){
   S.room = null; S.isTeacher = false; S.nick = ""; authors = new Map(); history.length = 0;
   S.settings = {maxColors:8, mm:5, m:1, locked:false};
-  $("roomTitle").textContent = "校舎ブロック工房（ひとりで試す）"; $("hudCode").hidden = true; $("teacherBox").hidden = false; $("tCode").textContent="ひとり";
+  $("roomTitle").textContent = "校舎ブロック工房（ひとりで試す）"; $("hudCode").hidden = true; $("hudRt").hidden = true; S.rtStatus = null; $("teacherBox").hidden = false; $("tCode").textContent="ひとり";
   $("btnCopyLink").hidden = true; $("btnBackRooms").hidden = true; $("lockRoom").parentElement.hidden = true; $("authorsBox").hidden = true;
   $("btnLeave").textContent = "入口に戻る";
   if(!restoreSolo()) voxels = buildSample();
@@ -414,7 +538,7 @@ async function leaveRoom(){
   if(S.channel){ await sb.removeChannel(S.channel); S.channel=null; }
   stopDummy(); peers.clear(); renderPeers(); clearPeerGhosts();
   $("btnCopyLink").hidden=false; $("btnBackRooms").hidden=false; $("lockRoom").parentElement.hidden=false; $("authorsBox").hidden=false;
-  const wasTeacher = S.isTeacher; S.room=null;
+  const wasTeacher = S.isTeacher; S.room=null; S.rtStatus=null; $("hudRt").hidden=true;
   if(wasTeacher){ show("scrTeacher"); refreshAuth(); } else show("scrHome");
 }
 $("btnLeave").addEventListener("click", leaveRoom);
@@ -471,6 +595,7 @@ async function connectRealtime(){
   });
   ch.on("broadcast", {event:"settings"}, ({payload}) => { S.settings = payload; applySettings(); if(!S.isTeacher) toast(payload.locked ? "先生が操作を止めました" : "設定が変わりました"); });
   await ch.subscribe(async status => {
+    setRt(status);
     if(status==="SUBSCRIBED") await ch.track({nick:S.nick, hue:hueOf(S.nick+S.myId), teacher:S.isTeacher});
   });
   S.channel = ch;
@@ -849,7 +974,7 @@ function endPointer(e){ const wasSingle=pointers.size===1; pointers.delete(e.poi
 canvas.addEventListener("pointerup",endPointer); canvas.addEventListener("pointercancel",endPointer);
 canvas.addEventListener("pointerleave",()=>{ if(pointers.size===0) ghost.visible=false; });
 canvas.addEventListener("wheel",e=>{ e.preventDefault(); zoom(e.deltaY>0?1.1:0.9); },{passive:false});
-document.addEventListener("keydown",e=>{ if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT"||$("scrEditor").hidden) return;
+document.addEventListener("keydown",e=>{ if(["INPUT","SELECT","TEXTAREA"].includes(e.target.tagName)||$("scrEditor").hidden||!$("fbOverlay").hidden) return;
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); }
   if(e.key==="1") setMode("place"); if(e.key==="2") setMode("erase"); if(e.key==="3") setMode("paint"); });
 
