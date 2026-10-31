@@ -91,6 +91,8 @@ textarea{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radi
 .avatar .pin{width:2px;height:14px;background:var(--c)}
 .avatar.idle{opacity:.45}
 .notices{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.stage canvas.minimap{position:absolute;right:max(12px,env(safe-area-inset-right,0px));bottom:12px;width:160px;height:160px;border-radius:10px;border:2px solid var(--panel);box-shadow:0 2px 8px rgba(0,0,0,.3);background:#78ac4e;cursor:pointer;image-rendering:pixelated;touch-action:none}
+@media (max-width:760px){.stage canvas.minimap{width:112px;height:112px}}
 .notice{position:absolute;transform:translate(-50%,-50%);background:var(--panel);color:var(--fg);border:1.5px solid var(--accent);border-radius:999px;padding:2px 10px;font-size:12px;font-weight:700;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.25);animation:noticeIn .25s ease-out}
 .notice.erase{border-color:var(--warn);color:var(--warn)}
 @keyframes noticeIn{from{transform:translate(-50%,-30%);opacity:0}to{transform:translate(-50%,-50%);opacity:1}}
@@ -108,7 +110,7 @@ section{display:flex;flex-direction:column;gap:8px}
 .seg{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:var(--line);padding:3px;border-radius:8px}
 .seg button{border:0;background:transparent;color:var(--fg);padding:9px 4px;border-radius:6px;font-weight:500;cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.12)}
-.swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding-bottom:18px}
+.swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:24px 8px;padding-bottom:18px}
 .swatch{aspect-ratio:1;border-radius:8px;border:2px solid transparent;cursor:pointer;padding:0;position:relative;max-width:100%}
 .swatch[aria-pressed="true"]{border-color:var(--fg)}
 .swatch span{position:absolute;left:0;right:0;bottom:-18px;font-size:11px;color:var(--muted);text-align:center;white-space:nowrap}
@@ -175,7 +177,7 @@ section{display:flex;flex-direction:column;gap:8px}
       <div class="btn-row"><button class="btn primary" id="btnPwSave">変更する</button><button class="btn" id="btnPwCancel">やめる</button></div>
     </div>
     <h2>部屋をつくる</h2>
-    <div class="row"><input id="newRoomName" type="text" placeholder="例: 6年1組 校舎" maxlength="40"><button class="btn primary" id="btnCreateRoom">つくる</button></div>
+    <div class="row"><input id="newRoomName" type="text" placeholder="例: 6年1組 校舎" maxlength="40"><select id="newRoomSize" aria-label="作業台の広さ"><option value="32">32×32（練習）</option><option value="64">64×64</option><option value="128" selected>128×128（学校）</option></select><button class="btn primary" id="btnCreateRoom">つくる</button></div>
     <p class="small">1つの部屋＝1つの作品です。クラス全員で1つの校舎を作るなら部屋は1つで足ります。</p>
     <h2 id="roomsHeading">じぶんの部屋</h2>
     <div class="roomlist" id="roomList"></div>
@@ -206,6 +208,7 @@ section{display:flex;flex-direction:column;gap:8px}
     <canvas id="c"></canvas>
     <div class="avatars" id="avatars"></div>
     <div class="notices" id="notices"></div>
+    <canvas class="minimap" id="minimap" width="320" height="320" hidden title="タップでその場所へ移動"></canvas>
     <div class="hud">
       <h1 id="roomTitle">校舎ブロック工房</h1>
       <span class="pill code" id="hudCode" hidden></span>
@@ -305,7 +308,7 @@ section{display:flex;flex-direction:column;gap:8px}
 // ============================================================
 // 設定・共通
 // ============================================================
-const N = 32, H = 32;
+let N = 32; const H = 32;   // N = 作業台の一辺（部屋ごとに 32/64/128）、H = 高さの上限
 const PALETTE = [
   {name:"白い壁", hex:"#efe9dc"},{name:"屋根", hex:"#3b6ea8"},{name:"石", hex:"#8d8c85"},{name:"レンガ", hex:"#b35a3c"},
   {name:"木", hex:"#8a5a2b"},{name:"芝生", hex:"#5e9b4c"},{name:"窓", hex:"#86bfe0"},{name:"黄色", hex:"#e3b94b"},
@@ -342,7 +345,27 @@ const S = {
   channel:null,
   settings:{maxColors:3, mm:5, m:1, locked:false},
 };
-let voxels = new Map();     // "i,j,k" → 色番号
+// ---- ブロックの入れ物 ----
+// 作業台を 16×16 マスの「区画（チャンク）」に分けて管理する。
+// ブロックが変わったら、その区画（と隣の区画）だけ形を作り直す → 広い作業台でも軽い
+const CH = 16;
+const ckOf = (i,j) => `${Math.floor(i/CH)},${Math.floor(j/CH)}`;
+const chunkIndex = new Map();   // 区画 → その区画にあるブロックのキーの集まり
+const dirtyChunks = new Set();  // 作り直しが必要な区画
+let worldReady = false;
+function markAround(i,j){ for(let di=-1;di<=1;di++) for(let dj=-1;dj<=1;dj++) dirtyChunks.add(ckOf(i+di,j+dj)); }
+class VoxelMap extends Map {    // 普通の Map と同じように使えて、変更があると区画に印を付ける
+  set(k,v){
+    const [i,j]=parse(k);
+    if(!super.has(k)){ const ck=ckOf(i,j); let s=chunkIndex.get(ck); if(!s){ s=new Set(); chunkIndex.set(ck,s); } s.add(k); }
+    super.set(k,v); markAround(i,j); if(worldReady) markDirty(); return this;
+  }
+  delete(k){
+    if(!super.has(k)) return false;
+    super.delete(k); const [i,j]=parse(k); chunkIndex.get(ckOf(i,j))?.delete(k); markAround(i,j); if(worldReady) markDirty(); return true;
+  }
+}
+let voxels = new VoxelMap();     // "i,j,k" → 色番号
 let authors = new Map();    // "i,j,k" → ニックネーム（部屋モードのみ）
 
 // ============================================================
@@ -421,7 +444,7 @@ $("btnCreateRoom").addEventListener("click", async () => {
   const name = $("newRoomName").value.trim() || "校舎";
   const {data:{user}} = await sb.auth.getUser();
   for(let attempt=0; attempt<5; attempt++){
-    const {error} = await sb.from("rooms").insert({code:genCode(), name, owner_id:user.id, school_id:S.teacher?.school_id ?? null});
+    const {error} = await sb.from("rooms").insert({code:genCode(), name, owner_id:user.id, school_id:S.teacher?.school_id ?? null, size:parseInt($("newRoomSize").value,10)});
     if(!error){ $("newRoomName").value=""; await listRooms(); return; }
     if(error.code!=="23505"){ toast("部屋を作れませんでした: "+error.message); return; } // 23505 = unique violation（コードがかぶった）
   }
@@ -437,7 +460,7 @@ async function listRooms(){
     const row = document.createElement("div"); row.className="roomrow";
     const who = names.get(r.owner_id) || "（不明）";
     const school = S.teacher?.is_admin ? `${r.schools?.name || "学校なし"} ・ ` : "";
-    row.innerHTML = `<div><div>${esc(r.name)}</div><div class="meta">${esc(school)}作成: ${esc(who)} ・ ${new Date(r.created_at).toLocaleDateString("ja-JP")} ・ ${r.locked?"ロック中":"開いている"}</div></div>
+    row.innerHTML = `<div><div>${esc(r.name)}</div><div class="meta">${esc(school)}作成: ${esc(who)} ・ ${r.size||32}マス ・ ${new Date(r.created_at).toLocaleDateString("ja-JP")} ・ ${r.locked?"ロック中":"開いている"}</div></div>
       <span class="code">${r.code}</span><div class="row"><button class="btn primary">開く</button><button class="btn danger">削除</button></div>`;
     const [open, del] = row.querySelectorAll("button");
     open.addEventListener("click", async () => { S.nick=S.teacher?.display_name || "先生"; S.isTeacher=true; await enterRoom(r); });
@@ -553,7 +576,7 @@ function applyRole(){
   $("dummyRow").hidden = !isAdmin();
   if(!isAdmin() && $("showDummy").checked){ $("showDummy").checked = false; applyDummy(); }
   $("floatFlag").hidden = student && !S.settings.showWarnings;   // 生徒への警告は先生がオンにしたときだけ
-  setMode(mode); markDirty();
+  setMode(mode); rebuildAll();
 }
 
 function applySettings(){
@@ -567,7 +590,8 @@ function applySettings(){
 async function enterRoom(room){
   S.room = room;
   S.settings = {maxColors:room.max_colors, mm:Number(room.mm_per_block), m:Number(room.m_per_block), locked:room.locked, showWarnings:!!room.show_warnings};
-  voxels = new Map(); authors = new Map(); history.length = 0;
+  setWorldSize(room.size || 32);
+  replaceWorld(); authors = new Map(); history.length = 0;
   $("roomTitle").textContent = room.name; $("hudCode").textContent = room.code; $("hudCode").hidden=false; setRt("CONNECTING");
   $("tCode").textContent = room.code; selectTab("make");
   // 入室位置: 生徒は中央から少しずらす（全員が同じ場所に重ならないように）。先生は中央
@@ -585,7 +609,8 @@ function enterSolo(){
   $("roomTitle").textContent = "校舎ブロック工房（ひとりで試す）"; $("hudCode").hidden = true; $("hudRt").hidden = true; S.rtStatus = null; $("tCode").textContent="ひとり"; selectTab("make");
   $("btnCopyLink").hidden = true; $("btnBackRooms").hidden = true; $("lockRoom").parentElement.hidden = true; $("studentWarnRow").hidden = true; $("authorsBox").hidden = true;
   $("btnLeave").textContent = "入口に戻る";
-  if(!restoreSolo()) voxels = buildSample();
+  setWorldSize(32);
+  if(!restoreSolo()) replaceWorld(buildSample());
   show("scrEditor"); applySettings(); markDirty(); applyDummy();
 }
 async function leaveRoom(){
@@ -603,18 +628,15 @@ $("btnCopyLink").addEventListener("click", async () => {
 });
 
 // ------------------------------------------------------------
-// データ読み込み: Supabase は1回に1000行までなので、1000行ずつ繰り返し取る
+// データ読み込み: データベースの関数 room_blocks で、部屋のブロックを1回でまとめて取る
 // ------------------------------------------------------------
 async function loadAllBlocks(){
-  let from = 0; const PAGE = 1000;
-  while(true){
-    const {data, error} = await sb.from("blocks").select("x,y,z,color,author").eq("room_id", S.room.id).range(from, from+PAGE-1);
-    if(error){ toast("読み込みエラー: "+error.message); break; }
-    for(const b of data){ voxels.set(key(b.x,b.y,b.z), b.color); if(b.author) authors.set(key(b.x,b.y,b.z), b.author); }
-    if(data.length < PAGE) break;
-    from += PAGE;
-  }
-  markDirty();
+  const {data, error} = await sb.rpc("room_blocks", {p_room:S.room.id});
+  if(error){ toast("読み込みエラー: "+error.message); return; }
+  const m = new Map();
+  for(const [x,y,z,c,a] of data){ const k=key(x,y,z); m.set(k,c); if(a) authors.set(k,a); }
+  for(const [k,c] of voxels) m.set(k,c);   // 読み込み中にリアルタイムで届いた変更を上書きで残す
+  replaceWorld(m);
 }
 
 // ------------------------------------------------------------
@@ -741,11 +763,11 @@ async function undo(){
   await remoteApply(inverse);
 }
 async function bulkReplace(newMap){
-  if(!S.room){ history.push([...voxels].map(([k,c])=>({k,before:c,after:null})).concat([...newMap].map(([k,c])=>({k,before:null,after:c})))); voxels = new Map(newMap); markDirty(); return; }
+  if(!S.room){ history.push([...voxels].map(([k,c])=>({k,before:c,after:null})).concat([...newMap].map(([k,c])=>({k,before:null,after:c})))); replaceWorld(newMap); return; }
   if(!S.isTeacher){ toast("先生だけができます"); return; }
   const {error} = await sb.rpc("clear_room", {p_room:S.room.id});
   if(error){ toast("消せませんでした: "+error.message); return; }
-  voxels = new Map(); authors = new Map(); history.length=0; markDirty();
+  replaceWorld(); authors = new Map(); history.length=0;
   const rows = [...newMap].map(([k,c]) => { const [x,y,z]=parse(k); return {room_id:S.room.id, x,y,z, color:c, author:S.nick||"先生"}; });
   for(let i=0;i<rows.length;i+=500){ const r = await sb.from("blocks").upsert(rows.slice(i,i+500)); if(r.error){ toast("送信エラー: "+r.error.message); break; } }
   for(const [k,c] of newMap){ voxels.set(k,c); authors.set(k,S.nick||"先生"); }
@@ -767,8 +789,8 @@ for(const id of ["maxColors","mmPer","mPer","lockRoom","studentWarn"]) $(id).add
 // お手本（2階建ての校舎 + 体育館、3色）
 // ============================================================
 function buildSample(){
-  const v = new Map();
-  const set = (i,j,k,c) => { if(inBounds(i,j,k)) v.set(key(i,j,k),c); };
+  const v = new Map(), o = Math.floor((N-32)/2);   // 広い作業台でも中央に置く
+  const set = (i,j,k,c) => { i+=o; j+=o; if(inBounds(i,j,k)) v.set(key(i,j,k),c); };
   const box = (x0,y0,z0,x1,y1,z1,c) => { for(let i=x0;i<=x1;i++) for(let j=y0;j<=y1;j++) for(let k=z0;k<=z1;k++) set(i,j,k,c); };
   const X0=6, Y0=12, W=16, D=6;
   for(let f=0; f<2; f++){
@@ -855,7 +877,7 @@ function download(filename, data){
 const canvas=$("c");
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true}); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 const scene=new THREE.Scene(); const camera=new THREE.PerspectiveCamera(45,1,0.1,500);
-const OFF=N/2;
+let OFF=N/2;
 // ---- 見た目: 空・草地・ブロックの質感 ----
 // 面の向きごとの明るさ（上=1.0、前後=0.8、左右=0.6、下=0.5）。照明計算は使わない。
 const SHADE = {"0,0,1":1.0, "0,1,0":0.8, "0,-1,0":0.8, "1,0,0":0.6, "-1,0,0":0.6, "0,0,-1":0.5};
@@ -888,7 +910,26 @@ const ground=new THREE.Mesh(new THREE.PlaneGeometry(N,N), new THREE.MeshBasicMat
 ground.rotation.x=-Math.PI/2; ground.position.y=-0.005; scene.add(ground);
 const border=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(N,N)), new THREE.LineBasicMaterial({color:0xffffff, transparent:true, opacity:0.75}));
 border.rotation.x=-Math.PI/2; border.position.y=0.01; scene.add(border);
-const voxMesh=new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({map:blockTex, vertexColors:true})); scene.add(voxMesh);
+const voxMat=new THREE.MeshBasicMaterial({map:blockTex, vertexColors:true});
+const chunkMeshes=new Map();   // 区画 → その区画の形（Mesh）
+let maxDist=140;               // ズームで引ける最大距離（広さで変える）
+function replaceWorld(entries){   // 作業台の中身をまるごと入れ替える
+  chunkIndex.clear(); dirtyChunks.clear();
+  for(const m of chunkMeshes.values()){ scene.remove(m); m.geometry.dispose(); } chunkMeshes.clear();
+  voxels = new VoxelMap(entries || []);
+  floating = new Set(); overhang = new Set();
+  markDirty(); analysisSoon(0);
+}
+function setWorldSize(n){       // 作業台の広さを変える（地面・枠・霧・ズーム・ミニマップ）
+  N=n; OFF=n/2;
+  ground.geometry.dispose(); ground.geometry=new THREE.PlaneGeometry(N,N); groundTex.repeat.set(N,N);
+  border.geometry.dispose(); border.geometry=new THREE.EdgesGeometry(new THREE.PlaneGeometry(N,N));
+  const outer=Math.max(400, N*5); outerGround.geometry.dispose(); outerGround.geometry=new THREE.PlaneGeometry(outer,outer); outerTex.repeat.set(outer,outer);
+  scene.fog.near=60+N*0.5; scene.fog.far=170+N*1.6;
+  maxDist=Math.max(140, N*2.2); cam.dist=N<=32 ? 40 : Math.min(maxDist, N*0.75); updateCamera();
+  $("minimap").hidden = N<=32;
+  miniBase=null;
+}
 const ghostGeo=new THREE.EdgesGeometry(new THREE.BoxGeometry(1.02,1.02,1.02));
 const ghost=new THREE.LineSegments(ghostGeo,new THREE.LineBasicMaterial({color:0x000000, transparent:true, opacity:0.7})); ghost.visible=false; scene.add(ghost);
 // ---- 手の届く範囲（生徒だけ）: 自分のいる場所（カメラが見ている地点）から半径 REACH ブロック ----
@@ -1021,18 +1062,39 @@ applyTheme(); matchMedia("(prefers-color-scheme: dark)").addEventListener("chang
 
 let floating=new Set(), overhang=new Set(), dirty=false;
 function markDirty(){ if(dirty) return; dirty=true; requestAnimationFrame(()=>{ dirty=false; rebuild(); }); }
-function rebuild(){
-  floating=findFloating(voxels); overhang=findOverhang(voxels);
+function rebuildAll(){ for(const ck of chunkIndex.keys()) dirtyChunks.add(ck); markDirty(); analysisSoon(0); }
+function colorMode(){
   const student=isStudent();
-  const showFloat=$("showFloat").checked && (!student || S.settings.showWarnings), fillOn=$("fillExport").checked || student; // 詰めて書き出すなら「支えなし」は問題にならないので塗らない
+  // 詰めて書き出すなら「支えなし」は問題にならないので塗らない。生徒には「浮き」だけ、先生がオンにしたときだけ
+  return { showFloat: $("showFloat").checked && (!student || S.settings.showWarnings), fillOn: $("fillExport").checked || student };
+}
+function rebuild(){
+  const cm=colorMode();
+  for(const ck of dirtyChunks) buildChunk(ck, cm);
+  dirtyChunks.clear();
+  quickStats();
+  analysisSoon(500);
+}
+// 1つの区画の形を作る（その区画のブロックの、外に見えている面だけ）
+function buildChunk(ck, cm){
+  const old=chunkMeshes.get(ck); if(old){ scene.remove(old); old.geometry.dispose(); chunkMeshes.delete(ck); }
+  const keys=chunkIndex.get(ck); if(!keys || !keys.size) return;
   const solid=(i,j,k)=> k<0 || voxels.has(key(i,j,k));   // 地面(k<0)も「詰まっている」扱い → 接地部分に影
-  const faces=exposedFaces(voxels).filter(f=>!(f.f.n[2]===-1 && f.h===0)); // 地面に接している底面は見えないので描かない
+  const faces=[];
+  for(const kk of keys){
+    const [i,j,h]=parse(kk), c=voxels.get(kk);
+    for(const f of FACES){
+      if(f.n[2]===-1 && h===0) continue;   // 地面に接している底面は見えないので描かない
+      if(voxels.has(key(i+f.n[0], j+f.n[1], h+f.n[2]))) continue;
+      faces.push({i,j,h,c,f,kk});
+    }
+  }
   const pos=new Float32Array(faces.length*18), col=new Float32Array(faces.length*18), uv=new Float32Array(faces.length*12);
   const UV=[[0,0],[1,0],[1,1],[0,1]];
   let p=0, t=0; const tmp=new THREE.Color();
-  for(const {i,j,h,c,f} of faces){
-    const kk=key(i,j,h);
-    tmp.set(showFloat&&floating.has(kk)?FLOAT_HEX : showFloat&&!fillOn&&overhang.has(kk)?OVER_HEX : PALETTE[c].hex);
+  for(const {i,j,h,c,f,kk} of faces){
+    const over = h>0 && !voxels.has(key(i,j,h-1));
+    tmp.set(cm.showFloat&&floating.has(kk)?FLOAT_HEX : cm.showFloat&&!cm.fillOn&&over?OVER_HEX : PALETTE[c].hex);
     const sh=SHADE[f.n.join(",")];
     // 各頂点の AO: 面の外側のマスから見て、横・縦・斜めの3マスが埋まっているほど暗く
     const ax=f.n[0]?0:f.n[1]?1:2, ua=(ax+1)%3, va=(ax+2)%3, out=[i+f.n[0], j+f.n[1], h+f.n[2]];
@@ -1043,21 +1105,75 @@ function rebuild(){
       return (A&&B) ? 0 : 3-(A+B+C);
     });
     const V=f.v.map(v=>[v[0]+i-OFF, v[2]+h, v[1]+j-OFF]);
-    // 画面の座標は「高さ」と「奥行き」を入れ替えているので、表から見た頂点の回り順が逆になる。
-    // 逆順で三角形を作らないと手前の面が消え、箱の内側が見えてしまう（以前の錯覚の原因）。
-    // また、暗い角が対角線上に筋を作らないよう、明るい方の対角線で四角形を2つに割る。
+    // 画面の座標は「高さ」と「奥行き」を入れ替えているので、表から見た頂点の回り順が逆になる → 逆順で三角形を作る。
+    // 暗い角が対角線上に筋を作らないよう、明るい方の対角線で四角形を2つに割る。
     const order = (ao[0]+ao[2] >= ao[1]+ao[3]) ? [0,2,1,0,3,2] : [1,3,2,1,0,3];
     for(const idx of order){ const k2=sh*AO[ao[idx]]; pos.set(V[idx],p); col.set([tmp.r*k2,tmp.g*k2,tmp.b*k2],p); uv.set(UV[idx],t); p+=3; t+=2; }
   }
   const g=new THREE.BufferGeometry();
   g.setAttribute("position",new THREE.BufferAttribute(pos,3)); g.setAttribute("color",new THREE.BufferAttribute(col,3)); g.setAttribute("uv",new THREE.BufferAttribute(uv,2));
-  voxMesh.geometry.dispose(); voxMesh.geometry=g;
-  updateStats();
+  const mesh=new THREE.Mesh(g, voxMat); scene.add(mesh); chunkMeshes.set(ck, mesh);
+}
+// 全体の検査（浮き・支えなし・寸法・色交換・ミニマップ）は重いので、最大2秒に1回まとめて行う
+let analysisTimer=null, lastAnalysis=0;
+function analysisSoon(ms=500){
+  if(analysisTimer) return;
+  const wait=Math.max(ms, 2000-(Date.now()-lastAnalysis));
+  analysisTimer=setTimeout(()=>{ analysisTimer=null; lastAnalysis=Date.now(); runAnalysis(); }, wait);
+}
+function runAnalysis(){
+  const prev=floating; floating=findFloating(voxels); overhang=findOverhang(voxels);
+  const cm=colorMode();
+  if(cm.showFloat){   // 浮いているかどうかが変わったブロックの区画だけ塗り直す
+    const cks=new Set();
+    for(const k of prev) if(!floating.has(k)){ const [i,j]=parse(k); cks.add(ckOf(i,j)); }
+    for(const k of floating) if(!prev.has(k)){ const [i,j]=parse(k); cks.add(ckOf(i,j)); }
+    for(const ck of cks) buildChunk(ck, cm);
+  }
+  updateStats(); buildMiniBase();
   if(!S.room) store.set("kousha-solo", JSON.stringify([...voxels].map(([k,c])=>[...parse(k),c])));
 }
+function quickStats(){
+  $("sCount").textContent=voxels.size.toLocaleString("ja-JP");
+  $("btnUndo").disabled=history.length===0; $("btnStl").disabled=voxels.size===0;
+}
+
+// ---- ミニマップ（真上から見た全体図。タップでその場所へ移動） ----
+let miniBase=null;
+function buildMiniBase(){
+  const c=document.createElement("canvas"); c.width=c.height=N; const g=c.getContext("2d");
+  const img=g.createImageData(N,N), top=new Map();
+  for(const [k,col] of voxels){ const [i,j,h]=parse(k); const t=top.get(i*1000+j); if(!t||h>t.h) top.set(i*1000+j,{h,col}); }
+  for(let p=0;p<N*N;p++){ img.data[p*4]=120; img.data[p*4+1]=172; img.data[p*4+2]=78; img.data[p*4+3]=255; }
+  const rgb=PALETTE.map(pc=>{ const x=new THREE.Color(pc.hex); return [x.r*255,x.g*255,x.b*255]; });
+  for(const [ij,{h,col}] of top){
+    const i=Math.floor(ij/1000), j=ij%1000; if(i<0||j<0||i>=N||j>=N) continue;
+    const sh=0.65+0.35*Math.min(1,(h+1)/12), o=(j*N+i)*4;   // 高いところほど明るく
+    img.data[o]=rgb[col][0]*sh; img.data[o+1]=rgb[col][1]*sh; img.data[o+2]=rgb[col][2]*sh;
+  }
+  g.putImageData(img,0,0); miniBase=c;
+}
+function drawMini(){
+  const mini=$("minimap"); if(mini.hidden || $("scrEditor").hidden) return;
+  if(!miniBase) buildMiniBase();
+  const W=mini.width, s=W/N, g=mini.getContext("2d");
+  g.imageSmoothingEnabled=false; g.drawImage(miniBase,0,0,W,W);
+  for(const p of peers.values()) if(p.cell){ g.fillStyle=`hsl(${p.hue} 60% 50%)`; g.beginPath(); g.arc((p.cell[0]+.5)*s,(p.cell[1]+.5)*s,8,0,7); g.fill(); g.strokeStyle="#fff"; g.lineWidth=2.5; g.stroke(); }
+  const mx=(cam.target.x+OFF)*s, mz=(cam.target.z+OFF)*s;
+  if(reachApplies()){ g.strokeStyle="rgba(255,255,255,.9)"; g.lineWidth=2; g.beginPath(); g.arc(mx,mz,REACH*s,0,7); g.stroke(); }
+  // 向いている方向（カメラから見ている方向）
+  g.strokeStyle="#fff"; g.lineWidth=5; g.beginPath(); g.moveTo(mx,mz); g.lineTo(mx-Math.sin(cam.theta)*28, mz-Math.cos(cam.theta)*28); g.stroke();
+  g.fillStyle="#fff"; g.beginPath(); g.arc(mx,mz,10,0,7); g.fill(); g.strokeStyle="#222"; g.lineWidth=2.5; g.stroke();
+}
+setInterval(drawMini, 250);
+$("minimap").addEventListener("pointerdown", e => {
+  e.stopPropagation(); const r=e.currentTarget.getBoundingClientRect();
+  const i=Math.floor((e.clientX-r.left)/r.width*N), j=Math.floor((e.clientY-r.top)/r.height*N);
+  if(i>=0&&j>=0&&i<N&&j<N) flyTo([i,j,0]);
+});
 function restoreSolo(){
   try{ const raw=store.get("kousha-solo"); if(!raw) return false; const arr=JSON.parse(raw); if(!arr.length) return false;
-    voxels=new Map(); for(const [i,j,k,c] of arr) if(inBounds(i,j,k)) voxels.set(key(i,j,k),c);
+    const m=new Map(); for(const [i,j,k,c] of arr) if(inBounds(i,j,k)) m.set(key(i,j,k),c); replaceWorld(m);
     const st=store.get("kousha-solo-settings"); if(st) S.settings={...S.settings,...JSON.parse(st)}; return true; }catch(_){ return false; }
 }
 
@@ -1074,7 +1190,7 @@ function pan(dx,dy){
   const k=cam.dist*0.0016, depth=1/Math.max(0.35,Math.cos(cam.phi));   // 奥行き方向は斜めに見ている分だけ多めに動かす
   cam.target.addScaledVector(right,-dx*k); cam.target.addScaledVector(fwd,dy*k*depth); clampTarget(); updateCamera();
 }
-function zoom(f){ cam.dist=Math.min(140,Math.max(6,cam.dist*f)); updateCamera(); }
+function zoom(f){ cam.dist=Math.min(maxDist,Math.max(6,cam.dist*f)); updateCamera(); }
 
 // ---- 入力 ----
 let mode="place", color=0;
@@ -1082,7 +1198,7 @@ const pointers=new Map(); let dragging=false, downPos=null, downButton=0, lastPi
 const ray=new THREE.Raycaster(), ndc=new THREE.Vector2();
 function pick(cx,cy){
   const r=canvas.getBoundingClientRect(); ndc.set(((cx-r.left)/r.width)*2-1, -((cy-r.top)/r.height)*2+1); ray.setFromCamera(ndc,camera);
-  const hits=ray.intersectObjects([voxMesh,ground]); if(!hits.length) return null;
+  const hits=ray.intersectObjects([...chunkMeshes.values(), ground]); if(!hits.length) return null;
   const h=hits[0], p=h.point;
   if(h.object===ground) return {target:[Math.floor(p.x+OFF),Math.floor(p.z+OFF),0], existing:null};
   const n=h.face.normal;
@@ -1141,8 +1257,8 @@ const sw=$("swatches");
 function selectColor(idx){ color=idx; [...sw.children].forEach((x,i)=>x.setAttribute("aria-pressed",String(i===idx))); }
 PALETTE.forEach((c,idx)=>{ const b=document.createElement("button"); b.className="swatch"; b.style.background=c.hex; b.setAttribute("aria-label",c.name); b.innerHTML=`<span>${c.name}</span>`; b.addEventListener("click",()=>selectColor(idx)); sw.appendChild(b); });
 selectColor(0);
-$("showFloat").addEventListener("change",markDirty);
-$("fillExport").addEventListener("change",markDirty);
+$("showFloat").addEventListener("change",rebuildAll);
+$("fillExport").addEventListener("change",rebuildAll);
 
 function updateStats(){
   const mm=S.settings.mm, m=S.settings.m, n=voxels.size;
@@ -1195,7 +1311,7 @@ $("btnSample").addEventListener("click",()=>bulkReplace(buildSample()));
 // ---- 起動 ----
 function resize(){ const r=canvas.parentElement.getBoundingClientRect(); if(!r.width) return; renderer.setSize(r.width,r.height,false); camera.aspect=r.width/r.height; camera.updateProjectionMatrix(); }
 new ResizeObserver(resize).observe(canvas.parentElement);
-updateCamera();
+updateCamera(); worldReady = true;
 (function loop(){ if(!$("scrEditor").hidden){ renderer.render(scene,camera); updateAvatars(); } requestAnimationFrame(loop); })();
 if(location.hash==="#teacher"){ show("scrTeacher"); refreshAuth(); }
 })();
