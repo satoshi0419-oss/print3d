@@ -317,6 +317,9 @@ const parse = s => s.split(",").map(Number);
 const inBounds = (i,j,k) => i>=0 && j>=0 && k>=0 && i<N && j<N && k<H;
 const fmt = x => x.toLocaleString("ja-JP",{maximumFractionDigits:1});
 const store = { get(k){ try{return localStorage.getItem(k);}catch(_){return null;} }, set(k,v){ try{localStorage.setItem(k,v);}catch(_){} } };
+// 端末ID: この端末（ブラウザ）の目印。ページを開き直しても同じ。
+// 同じ端末から同じニックネームで入り直したときに「自分の残り」と見分けるために使う
+const DEVICE_ID = (() => { let d = store.get("kousha-device"); if(!d){ d = Math.random().toString(36).slice(2,12); store.set("kousha-device", d); } return d; })();
 let toastTimer;
 function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),2800); }
 
@@ -637,8 +640,9 @@ async function connectRealtime(){
     for(const [id, metas] of Object.entries(state)){
       if(id===S.myId) continue; seen.add(id);
       const m = metas[metas.length-1];
+      if(m.device===DEVICE_ID && (m.nick||"")===S.nick){ seen.delete(id); continue; }   // 開き直す前の自分の残りは表示しない
       const isNew = !peers.has(id);
-      const p = peers.get(id) || {}; peers.set(id, {...p, nick:m.nick, hue:m.hue, teacher:m.teacher, at:m.at});
+      const p = peers.get(id) || {}; peers.set(id, {...p, nick:m.nick, hue:m.hue, teacher:m.teacher, at:m.at, device:m.device});
       if(isNew) newcomer = true;
     }
     // 新しく入ってきた人がいたら、自分の位置を送り直す（位置は「変わったときだけ」送るので、そのままだと新しい人に届かない）
@@ -648,7 +652,7 @@ async function connectRealtime(){
     // 同じニックネーム: 先に入っていた人（または先生）を優先し、あとから来た生徒は入口に戻す
     if(S.room && !S.isTeacher && !S.kicking){
       const me = S.nick.trim().toLowerCase();
-      const dup = [...peers.entries()].some(([id,p]) => id!==DUMMY_ID && (p.nick||"").trim().toLowerCase()===me && (p.teacher || (p.at||0) < S.joinedAt || ((p.at||0)===S.joinedAt && id < S.myId)));
+      const dup = [...peers.entries()].some(([id,p]) => id!==DUMMY_ID && p.device!==DEVICE_ID && (p.nick||"").trim().toLowerCase()===me && (p.teacher || (p.at||0) < S.joinedAt || ((p.at||0)===S.joinedAt && id < S.myId)));
       if(dup){
         S.kicking = true; const nick = S.nick;
         leaveRoom().then(() => { S.kicking=false; const err=$("joinErr"); err.textContent=`「${nick}」はこの部屋でもう使われています。別のニックネームにしてね`; err.hidden=false; });
@@ -662,7 +666,7 @@ async function connectRealtime(){
   ch.on("broadcast", {event:"settings"}, ({payload}) => { S.settings = payload; applySettings(); if(!S.isTeacher) toast(payload.locked ? "先生が操作を止めました" : "設定が変わりました"); });
   await ch.subscribe(async status => {
     setRt(status);
-    if(status==="SUBSCRIBED") await ch.track({nick:S.nick, hue:hueOf(S.nick+S.myId), teacher:S.isTeacher, at:S.joinedAt});
+    if(status==="SUBSCRIBED") await ch.track({nick:S.nick, hue:hueOf(S.nick+S.myId), teacher:S.isTeacher, at:S.joinedAt, device:DEVICE_ID});
   });
   S.channel = ch;
 }
