@@ -1061,7 +1061,12 @@ function applyTheme(){ /* 3D の世界は空と草地で固定。画面テーマ
 applyTheme(); matchMedia("(prefers-color-scheme: dark)").addEventListener("change",applyTheme);
 
 let floating=new Set(), overhang=new Set(), dirty=false;
-function markDirty(){ if(dirty) return; dirty=true; requestAnimationFrame(()=>{ dirty=false; rebuild(); }); }
+// 次の描画のタイミングで作り直す。画面が隠れていて描画が止まっているときも、0.4秒後には必ず作り直す
+function markDirty(){
+  if(dirty) return; dirty=true;
+  const run=()=>{ if(!dirty) return; dirty=false; rebuild(); };
+  requestAnimationFrame(run); setTimeout(run, 400);
+}
 function rebuildAll(){ for(const ck of chunkIndex.keys()) dirtyChunks.add(ck); markDirty(); analysisSoon(0); }
 function colorMode(){
   const student=isStudent();
