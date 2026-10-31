@@ -126,10 +126,19 @@ section{display:flex;flex-direction:column;gap:8px}
 .btn-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer}
 .teacher{border:1px solid var(--accent);border-radius:10px;padding:12px;gap:10px}
-.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--line);padding:3px;border-radius:10px;position:sticky;top:0;z-index:2}
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--line);padding:3px;border-radius:10px;position:sticky;top:0;z-index:2;box-shadow:0 -14px 0 0 var(--panel),0 8px 10px -8px rgba(0,0,0,.18)}
 .tabs button{border:0;background:transparent;color:var(--fg);padding:9px 4px;border-radius:7px;font-weight:700;cursor:pointer}
 .tabs button[aria-selected="true"]{background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .tabpanel{display:flex;flex-direction:column;gap:16px}
+.cutchips{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.cutchip{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--accent);color:var(--fg);border-radius:999px;padding:1px 2px 1px 10px;font-size:13px;font-variant-numeric:tabular-nums}
+.cutchip button{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:2px 7px}
+.partlist{display:flex;flex-direction:column;gap:6px}
+.part{border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:grid;grid-template-columns:1fr auto;gap:2px 8px;font-size:13px}
+.part b{font-weight:700}
+.part .st{font-size:12px;font-weight:500}
+.part .st.ok{color:var(--ok)} .part .st.bad{color:var(--warn)}
+.part .meta{grid-column:1/-1;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .coordgrid{display:grid;grid-template-columns:auto 1fr 1fr 1fr;gap:6px;align-items:center;font-size:12px}
 .coordgrid b{font-weight:500;color:var(--muted);text-align:center}
 .coordgrid input{min-width:0;width:100%;padding:7px 4px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit;font-size:14px;text-align:center;font-variant-numeric:tabular-nums}
@@ -313,6 +322,17 @@ section{display:flex;flex-direction:column;gap:8px}
         <button class="btn primary" id="btnStl">STLファイルを書き出す</button>
         <div class="btn-row"><button class="btn" id="btnSave">JSON保存</button><button class="btn" id="btnLoad">JSON読み込み</button></div>
         <input type="file" id="fileIn" accept=".json,application/json" hidden>
+      </section>
+      <section>
+        <div class="label">階ごとに分けて書き出す</div>
+        <p class="small">床や天井のすぐ下で切ると、どのパーツも平らに置いてサポート材なしで印刷でき、積み重ねると中に部屋ができます。中は詰めずに書き出します。</p>
+        <label class="toggle"><input type="checkbox" id="onlyRange"> 「範囲」で囲んだ建物だけ</label>
+        <p class="small" id="onlyRangeNote" hidden>「作る」タブの「範囲」で、建物を囲んでください（高さは全部が対象になります）。</p>
+        <div class="row"><span class="small">切る高さ</span><span class="cutchips" id="cutChips"></span></div>
+        <div class="row"><input id="cutAdd" type="number" inputmode="numeric" placeholder="Y" aria-label="切る高さ（Y）"><button class="btn" id="btnCutAdd">追加</button><button class="btn" id="btnCutAuto">自動で提案</button></div>
+        <div class="partlist" id="partList"></div>
+        <label class="toggle"><input type="checkbox" id="explode"> 分解して見る</label>
+        <button class="btn primary" id="btnPartsStl">パーツごとにSTLを書き出す（zip）</button>
       </section>
     </div>
   </aside>
@@ -586,6 +606,7 @@ const isAdmin = () => !!S.teacher?.is_admin;
 function selectTab(name){
   for(const b of $("panelTabs").children) b.setAttribute("aria-selected", String(b.dataset.tab===name));
   $("tabMake").hidden = name!=="make"; $("tabTeacher").hidden = name!=="teacher"; $("tabExport").hidden = name!=="export";
+  if(name==="export"){ if(!cutsAutoDone){ cuts = suggestCuts(partSource()); cutsAutoDone = true; } refreshParts(); } else if(exploded) updateExplode();
 }
 for(const b of $("panelTabs").children) b.addEventListener("click", () => selectTab(b.dataset.tab));
 function applyRole(){
@@ -609,7 +630,7 @@ function applySettings(){
 async function enterRoom(room){
   S.room = room;
   S.settings = {maxColors:room.max_colors, mm:Number(room.mm_per_block), m:Number(room.m_per_block), locked:room.locked, showWarnings:!!room.show_warnings};
-  setWorldSize(room.size || 32);
+  setWorldSize(room.size || 32); cuts = []; cutsAutoDone = false;
   replaceWorld(); authors = new Map(); history.length = 0;
   $("roomTitle").textContent = room.name; $("hudCode").textContent = room.code; $("hudCode").hidden=false; setRt("CONNECTING");
   $("tCode").textContent = room.code; selectTab("make");
@@ -628,7 +649,7 @@ function enterSolo(){
   $("roomTitle").textContent = "校舎ブロック工房（ひとりで試す）"; $("hudCode").hidden = true; $("hudRt").hidden = true; S.rtStatus = null; $("tCode").textContent="ひとり"; selectTab("make");
   $("btnCopyLink").hidden = true; $("btnBackRooms").hidden = true; $("lockRoom").parentElement.hidden = true; $("studentWarnRow").hidden = true; $("authorsBox").hidden = true;
   $("btnLeave").textContent = "入口に戻る";
-  setWorldSize(32);
+  setWorldSize(32); cuts = []; cutsAutoDone = false;
   if(!restoreSolo()) replaceWorld(buildSample());
   show("scrEditor"); applySettings(); markDirty(); applyDummy();
 }
@@ -1072,6 +1093,7 @@ function updateRangePreview(){
   else if(nf>lim || nc>lim) msg+=`。一度に変えられるのは ${lim.toLocaleString("ja-JP")} 個までです`;
   info.textContent=msg;
   $("btnRangeFill").disabled = !reach || nf>lim || nf===0; $("btnRangeClear").disabled = !reach || nc>lim || nc===0;
+  if($("onlyRange").checked && !$("tabExport").hidden) refreshParts();
 }
 async function rangeApply(fill){
   updateRangePreview(); if($(fill?"btnRangeFill":"btnRangeClear").disabled) return;
@@ -1218,17 +1240,16 @@ function rebuild(){
   quickStats();
   analysisSoon(500);
 }
-// 1つの区画の形を作る（その区画のブロックの、外に見えている面だけ）
-function buildChunk(ck, cm){
-  const old=chunkMeshes.get(ck); if(old){ scene.remove(old); old.geometry.dispose(); chunkMeshes.delete(ck); }
-  const keys=chunkIndex.get(ck); if(!keys || !keys.size) return;
-  const solid=(i,j,k)=> k<0 || voxels.has(key(i,j,k));   // 地面(k<0)も「詰まっている」扱い → 接地部分に影
+// ブロックの集まりから形（外に見えている面だけ）を作る。区画の表示にも、分解プレビューにも使う
+//  keys: 形にするブロックのキー / has, get: ブロックの有無と色を調べる関数 / colorOf: 面の色を決める関数
+function buildGeometry(keys, has, get, colorOf){
+  const solid=(i,j,k)=> k<0 || has(key(i,j,k));   // 地面(k<0)も「詰まっている」扱い → 接地部分に影
   const faces=[];
   for(const kk of keys){
-    const [i,j,h]=parse(kk), c=voxels.get(kk);
+    const [i,j,h]=parse(kk), c=get(kk);
     for(const f of FACES){
       if(f.n[2]===-1 && h===0) continue;   // 地面に接している底面は見えないので描かない
-      if(voxels.has(key(i+f.n[0], j+f.n[1], h+f.n[2]))) continue;
+      if(has(key(i+f.n[0], j+f.n[1], h+f.n[2]))) continue;
       faces.push({i,j,h,c,f,kk});
     }
   }
@@ -1236,8 +1257,8 @@ function buildChunk(ck, cm){
   const UV=[[0,0],[1,0],[1,1],[0,1]];
   let p=0, t=0; const tmp=new THREE.Color();
   for(const {i,j,h,c,f,kk} of faces){
-    const over = h>0 && !voxels.has(key(i,j,h-1));
-    tmp.set(cm.showFloat&&floating.has(kk)?FLOAT_HEX : cm.showFloat&&!cm.fillOn&&over?OVER_HEX : PALETTE[c].hex);
+    const over = h>0 && !has(key(i,j,h-1));
+    tmp.set(colorOf(kk, c, over));
     const sh=SHADE[f.n.join(",")];
     // 各頂点の AO: 面の外側のマスから見て、横・縦・斜めの3マスが埋まっているほど暗く
     const ax=f.n[0]?0:f.n[1]?1:2, ua=(ax+1)%3, va=(ax+2)%3, out=[i+f.n[0], j+f.n[1], h+f.n[2]];
@@ -1255,7 +1276,15 @@ function buildChunk(ck, cm){
   }
   const g=new THREE.BufferGeometry();
   g.setAttribute("position",new THREE.BufferAttribute(pos,3)); g.setAttribute("color",new THREE.BufferAttribute(col,3)); g.setAttribute("uv",new THREE.BufferAttribute(uv,2));
-  const mesh=new THREE.Mesh(g, voxMat); scene.add(mesh); chunkMeshes.set(ck, mesh);
+  return g;
+}
+// 1つの区画の形を作る
+function buildChunk(ck, cm){
+  const old=chunkMeshes.get(ck); if(old){ scene.remove(old); old.geometry.dispose(); chunkMeshes.delete(ck); }
+  const keys=chunkIndex.get(ck); if(!keys || !keys.size) return;
+  const g=buildGeometry(keys, k=>voxels.has(k), k=>voxels.get(k),
+    (kk,c,over) => cm.showFloat&&floating.has(kk) ? FLOAT_HEX : cm.showFloat&&!cm.fillOn&&over ? OVER_HEX : PALETTE[c].hex);
+  const mesh=new THREE.Mesh(g, voxMat); mesh.visible=!exploded; scene.add(mesh); chunkMeshes.set(ck, mesh);
 }
 // 全体の検査（浮き・支えなし・寸法・色交換・ミニマップ）は重いので、最大2秒に1回まとめて行う
 let analysisTimer=null, lastAnalysis=0;
@@ -1273,7 +1302,7 @@ function runAnalysis(){
     for(const k of floating) if(!prev.has(k)){ const [i,j]=parse(k); cks.add(ckOf(i,j)); }
     for(const ck of cks) buildChunk(ck, cm);
   }
-  updateStats(); buildMiniBase();
+  updateStats(); buildMiniBase(); if(!$("tabExport").hidden) refreshParts();
   if(!S.room) store.set("kousha-solo", JSON.stringify([...voxels].map(([k,c])=>[...parse(k),c])));
 }
 function quickStats(){
@@ -1349,6 +1378,7 @@ function pick(cx,cy){
   return {target:[Math.floor(p.x+n.x*0.5+OFF),Math.floor(p.z+n.z*0.5+OFF),Math.floor(p.y+n.y*0.5)], existing:[Math.floor(p.x-n.x*0.5+OFF),Math.floor(p.z-n.z*0.5+OFF),Math.floor(p.y-n.y*0.5)]};
 }
 function act(cx,cy,forceErase){
+  if(exploded){ toast("「分解して見る」の間は編集できません"); return; }
   const hit=pick(cx,cy); if(!hit) return;
   const m=forceErase?"erase":mode;
   if(m==="move"){ const c=hit.existing||hit.target; if(inBounds(c[0],c[1],0)) flyTo(c); return; }
@@ -1449,6 +1479,127 @@ $("btnStl").addEventListener("click",()=>{
   const entries=[...byColor].sort((a,b)=>a[0]-b[0]).map(([c,m])=>({name:`${safeName()}_${String(c+1).padStart(2,"0")}_${PALETTE[c].name}.stl`,data:buildSTL(m,mm)}));
   download(`${safeName()}_colors.zip`,makeZip(entries)); toast(`${entries.length}色分のSTLをzipにしました`);
 });
+// ============================================================
+// 階ごとに分けて書き出す
+//  切る高さ Y=c は「Y=c の段から上を次のパーツにする」という意味。床や天井の板の段で切ると、
+//  その板がパーツの一番下（プリンターの台の上）に来るので、サポート材がいらなくなる
+// ============================================================
+const BED_MM = 300;        // 教室のプリンター（K2 Pro）の台の大きさの目安
+const BRIDGE = 3;          // 支えから3ブロックまでの張り出しは、プリンターが橋渡し（ブリッジ）で印刷できるとみなす
+let cuts = [], cutsAutoDone = false, exploded = false, lastParts = [];
+const previewGroup = new THREE.Group(); scene.add(previewGroup);
+
+function partSource(){   // 書き出しの対象（全体、または「範囲」で囲んだ建物）
+  if(!$("onlyRange").checked) return voxels;
+  const r = rangeBounds(); if(!r) return new Map();
+  const m = new Map();
+  for(const [k,c] of voxels){ const [i,j] = parse(k); if(i>=r.lo[0] && i<=r.hi[0] && j>=r.lo[1] && j<=r.hi[1]) m.set(k,c); }
+  return m;
+}
+// 切る高さの提案: 「真下が空いているブロック」がその段にまとまってある（＝床・天井・屋根の板がある）高さ
+function suggestCuts(src){
+  const over = new Map(), total = new Map();
+  for(const k of src.keys()){ const [i,j,h] = parse(k); total.set(h,(total.get(h)||0)+1); if(h>0 && !src.has(key(i,j,h-1))) over.set(h,(over.get(h)||0)+1); }
+  const hs = [...over].filter(([h,c]) => c>=6 && c>=0.3*(total.get(h)||1)).map(([h])=>h).sort((a,b)=>a-b);
+  return hs.filter((h,idx) => idx===0 || h-1!==hs[idx-1]);   // 段々の屋根などで続いている高さは、一番下だけにする
+}
+// 1つのパーツの検査: 浮いているブロックと、支えから遠すぎる張り出し
+function analyzePart(map, lo){
+  const seen = new Set(), st = [];
+  for(const k of map.keys()) if(parse(k)[2]===lo){ seen.add(k); st.push(k); }
+  while(st.length){ const [i,j,h] = parse(st.pop()); for(const f of FACES){ const nk = key(i+f.n[0], j+f.n[1], h+f.n[2]); if(map.has(nk) && !seen.has(nk)){ seen.add(nk); st.push(nk); } } }
+  const floatingK = new Set([...map.keys()].filter(k => !seen.has(k)));
+  const byLevel = new Map(); for(const k of map.keys()){ const h = parse(k)[2]; if(h===lo) continue; if(!byLevel.has(h)) byLevel.set(h,[]); byLevel.get(h).push(k); }
+  const longOver = new Set();
+  for(const [h,ks] of byLevel){
+    const dist = new Map(), q = [];
+    for(const k of ks){ const [i,j] = parse(k); if(map.has(key(i,j,h-1))){ dist.set(k,0); q.push(k); } }
+    for(let qi=0; qi<q.length; qi++){
+      const k = q[qi], d = dist.get(k); if(d>=BRIDGE) continue; const [i,j] = parse(k);
+      for(const [di,dj] of [[1,0],[-1,0],[0,1],[0,-1]]){ const nk = key(i+di,j+dj,h); if(map.has(nk) && !dist.has(nk)){ dist.set(nk,d+1); q.push(nk); } }
+    }
+    for(const k of ks) if(!dist.has(k) && !floatingK.has(k)) longOver.add(k);
+  }
+  return {floating:floatingK, longOver};
+}
+function computeParts(){
+  const src = partSource(); if(!src.size) return [];
+  let minH = Infinity, maxH = -Infinity;
+  for(const k of src.keys()){ const h = parse(k)[2]; if(h<minH) minH=h; if(h>maxH) maxH=h; }
+  const cs = cuts.filter(c => c>minH && c<=maxH);
+  const bounds = [minH, ...cs, maxH+1], parts = [];
+  for(let n=0; n<bounds.length-1; n++){
+    const lo = bounds[n], hi = bounds[n+1]-1, map = new Map();
+    for(const [k,c] of src){ const h = parse(k)[2]; if(h>=lo && h<=hi) map.set(k,c); }
+    if(!map.size) continue;
+    let mn=[Infinity,Infinity], mx=[-Infinity,-Infinity];
+    for(const k of map.keys()){ const [i,j] = parse(k); mn[0]=Math.min(mn[0],i); mn[1]=Math.min(mn[1],j); mx[0]=Math.max(mx[0],i); mx[1]=Math.max(mx[1],j); }
+    parts.push({lo, hi, map, size:[mx[0]-mn[0]+1, mx[1]-mn[1]+1, hi-lo+1], ...analyzePart(map, lo)});
+  }
+  parts.forEach((p,n) => { p.name = (n===parts.length-1 && parts.length>1 && p.size[2]<=3) ? "屋根" : `${n+1}階`; });
+  return parts;
+}
+function renderCuts(){
+  const box = $("cutChips"); box.innerHTML = "";
+  if(!cuts.length){ box.innerHTML = '<span class="small">なし（1つのまま）</span>'; return; }
+  for(const c of cuts){
+    const el = document.createElement("span"); el.className = "cutchip"; el.innerHTML = `Y=${c}<button aria-label="Y=${c}で切るのをやめる">×</button>`;
+    el.querySelector("button").addEventListener("click", () => { cuts = cuts.filter(x=>x!==c); refreshParts(); });
+    box.appendChild(el);
+  }
+}
+function refreshParts(){
+  $("onlyRangeNote").hidden = !($("onlyRange").checked && !rangeBounds());
+  renderCuts();
+  const mm = S.settings.mm, parts = computeParts(); lastParts = parts;
+  const list = $("partList"); list.innerHTML = "";
+  if(!parts.length){ list.innerHTML = '<p class="small">書き出すブロックがありません。</p>'; $("btnPartsStl").disabled = true; updateExplode(); return; }
+  $("btnPartsStl").disabled = false;
+  for(const p of parts){
+    const sx = p.size[0]*mm, sz = p.size[1]*mm, sy = p.size[2]*mm, g = p.map.size*Math.pow(mm/10,3)*1.24;
+    const issues = [];
+    if(p.floating.size) issues.push(`浮き ${p.floating.size}個`);
+    if(p.longOver.size) issues.push(`長い張り出し ${p.longOver.size}個`);
+    if(sx>BED_MM || sz>BED_MM) issues.push(`台（${BED_MM}mm角）に乗りません`);
+    const el = document.createElement("div"); el.className = "part";
+    el.innerHTML = `<b>${esc(p.name)}</b><span class="st ${issues.length?"bad":"ok"}">${issues.length ? esc(issues.join("・")) : "サポート材なしで印刷できます"}</span>
+      <span class="meta">Y ${p.lo}〜${p.hi} ・ ${p.map.size.toLocaleString("ja-JP")}個 ・ ${fmt(sx)}×${fmt(sz)}×${fmt(sy)}mm ・ 約${fmt(g)}g</span>`;
+    list.appendChild(el);
+  }
+  updateExplode();
+}
+// 分解して見る: パーツを上下に離して表示（問題のあるブロックは赤）
+function updateExplode(){
+  for(const m of [...previewGroup.children]){ m.geometry.dispose(); previewGroup.remove(m); }
+  exploded = $("explode").checked && !$("tabExport").hidden && !$("scrEditor").hidden;
+  for(const m of chunkMeshes.values()) m.visible = !exploded;
+  if(!exploded) return;
+  const GAP = 3;
+  lastParts.forEach((p,n) => {
+    const bad = new Set([...p.floating, ...p.longOver]);
+    const g = buildGeometry(p.map.keys(), k=>p.map.has(k), k=>p.map.get(k), (kk,c) => bad.has(kk) ? FLOAT_HEX : PALETTE[c].hex);
+    const mesh = new THREE.Mesh(g, voxMat); mesh.position.y = n*GAP; previewGroup.add(mesh);
+  });
+}
+$("btnCutAuto").addEventListener("click", () => { cuts = suggestCuts(partSource()); refreshParts(); toast(cuts.length ? `Y=${cuts.join("、")} で切る案を出しました` : "切る高さは見つかりませんでした（床や屋根の板が見当たりません）"); });
+$("btnCutAdd").addEventListener("click", () => { const v = parseInt($("cutAdd").value,10); if(isNaN(v) || v<1 || v>=H){ toast("切る高さは 1 から "+(H-1)+" までの数字にしてください"); return; } if(!cuts.includes(v)) cuts = [...cuts, v].sort((a,b)=>a-b); $("cutAdd").value=""; refreshParts(); });
+$("onlyRange").addEventListener("change", refreshParts);
+$("explode").addEventListener("change", updateExplode);
+$("btnPartsStl").addEventListener("click", () => {
+  const parts = lastParts; if(!parts.length) return;
+  const mm = S.settings.mm;
+  // 全パーツで同じ X・Z の基準にする（積み重ねたときの位置が合うように）。高さはパーツごとに一番下を 0 に
+  let mi = Infinity, mj = Infinity; for(const p of parts) for(const k of p.map.keys()){ const [i,j] = parse(k); if(i<mi) mi=i; if(j<mj) mj=j; }
+  const entries = parts.map((p,n) => {
+    const shifted = new Map(); for(const [k,c] of p.map){ const [i,j,h] = parse(k); shifted.set(key(i-mi, j-mj, h-p.lo), c); }
+    return {name:`${safeName()}_${n+1}_${p.name}.stl`, data:buildSTL(shifted, mm)};
+  });
+  const guide = ["組み立ての順番（下から）", ...parts.map((p,n) => `${n+1}. ${p.name}（Y ${p.lo}〜${p.hi}、${p.map.size}個）`), "", "どのパーツも、一番下の面を台に置いたまま印刷できます。", `1ブロック = ${mm}mm`].join("\r\n");
+  entries.push({name:`${safeName()}_組み立て順.txt`, data:new TextEncoder().encode(guide)});
+  download(`${safeName()}_parts.zip`, makeZip(entries));
+  toast(`${parts.length}個のパーツをzipにしました`);
+});
+
 $("btnSave").addEventListener("click",()=>{ download(`${safeName()}.json`,JSON.stringify({app:"kousha-block-studio",version:2,N,H,settings:S.settings,blocks:[...voxels].map(([k,c])=>[...parse(k),c])})); toast("JSONを保存しました"); });
 $("btnLoad").addEventListener("click",()=>$("fileIn").click());
 $("fileIn").addEventListener("change",async e=>{ const f=e.target.files[0]; if(!f) return;
