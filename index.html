@@ -338,6 +338,8 @@ section{display:flex;flex-direction:column;gap:8px}
         <div class="label">生徒への設定</div>
         <label class="toggle"><input type="checkbox" id="lockRoom"> 生徒の操作を止める（ロック）</label>
         <label class="toggle" id="studentWarnRow"><input type="checkbox" id="studentWarn"> 生徒にも「浮いているブロック」の警告を見せる</label>
+        <label class="toggle" id="oneColorRow"><input type="checkbox" id="oneColor"> 同じ高さには1色だけ置ける（フィラメントの交換を減らす）</label>
+        <p class="small" id="oneColorNote" hidden></p>
         <div class="row"><label for="maxColors">使える色</label><select id="maxColors"><option value="2">2色</option><option value="3">3色</option><option value="4">4色</option><option value="8">8色</option></select></div>
         <div class="row"><label for="mmPer">1ブロック =</label><input id="mmPer" type="number" min="1" max="30" step="0.5" value="5"><label>mm（印刷）</label></div>
         <div class="row"><label for="mPer">1ブロック =</label><input id="mPer" type="number" min="0.1" max="10" step="0.1" value="1"><label>m（実物）</label></div>
@@ -459,17 +461,50 @@ const chunkIndex = new Map();   // 区画 → その区画にあるブロック�
 const dirtyChunks = new Set();  // 作り直しが必要な区画
 let worldReady = false;
 function markAround(i,j){ for(let di=-1;di<=1;di++) for(let dj=-1;dj<=1;dj++) dirtyChunks.add(ckOf(i+di,j+dj)); }
+// 高さ（Y）ごとに、どの色が何個あるか。「同じ高さには1色だけ」の判定に使う
+const levelCounts = new Map();   // 高さ → Map(色 → 個数)
+function levelAdd(h, c, n){
+  let m = levelCounts.get(h); if(!m){ m = new Map(); levelCounts.set(h, m); }
+  const v = (m.get(c)||0) + n; if(v>0) m.set(c, v); else m.delete(c);
+}
 class VoxelMap extends Map {    // 普通の Map と同じように使えて、変更があると区画に印を付ける
   set(k,v){
-    const [i,j]=parse(k);
+    const [i,j,h]=parse(k);
     if(!super.has(k)){ const ck=ckOf(i,j); let s=chunkIndex.get(ck); if(!s){ s=new Set(); chunkIndex.set(ck,s); } s.add(k); }
+    else levelAdd(h, super.get(k), -1);
+    levelAdd(h, v, 1);
     super.set(k,v); markAround(i,j); if(worldReady) markDirty(); return this;
   }
   delete(k){
     if(!super.has(k)) return false;
-    super.delete(k); const [i,j]=parse(k); chunkIndex.get(ckOf(i,j))?.delete(k); markAround(i,j); if(worldReady) markDirty(); return true;
+    const [i,j,h]=parse(k); levelAdd(h, super.get(k), -1);
+    super.delete(k); chunkIndex.get(ckOf(i,j))?.delete(k); markAround(i,j); if(worldReady) markDirty(); return true;
   }
 }
+// 「同じ高さには1色だけ」のルール: 変更したあとに、ある高さで色が2つ以上になるなら違反
+// 戻り値: 違反がなければ null。あれば {h: 高さ, keep: その高さの今の色（1色のとき）}
+function levelViolation(changes){
+  if(!S.settings.oneColor) return null;
+  const delta = new Map();   // 高さ → Map(色 → 増減)
+  for(const c of changes){
+    const h = parse(c.k)[2]; let d = delta.get(h); if(!d){ d = new Map(); delta.set(h, d); }
+    if(c.before!==null && c.before!==undefined) d.set(c.before, (d.get(c.before)||0) - 1);
+    if(c.after!==null) d.set(c.after, (d.get(c.after)||0) + 1);
+  }
+  for(const [h,d] of delta){
+    if(![...d.values()].some(v=>v>0)) continue;   // 消すだけなら、いつでもよい
+    const base = levelCounts.get(h) || new Map(), colors = new Set();
+    for(const [c,n] of base) if(n + (d.get(c)||0) > 0) colors.add(c);
+    for(const [c,n] of d) if(!base.has(c) && n>0) colors.add(c);
+    if(colors.size > 1){ const now=[...base.keys()]; return {h, keep: now.length===1 ? now[0] : null}; }
+  }
+  return null;
+}
+function levelMessage(v){
+  return v.keep!==null ? `この高さ（Y=${v.h}）は「${PALETTE[v.keep].name}」の段です。ほかの色は置けません`
+                       : `この高さ（Y=${v.h}）は色が混ざっています。先生に1色にそろえてもらってね`;
+}
+function mixedLevels(){ return [...levelCounts].filter(([h,m])=>m.size>1).map(([h])=>h).sort((a,b)=>a-b); }
 let voxels = new VoxelMap();     // "i,j,k" → 色番号
 let authors = new Map();    // "i,j,k" → ニックネーム（部屋モードのみ）
 
@@ -722,7 +757,7 @@ setInterval(async () => {
 
 function applySettings(){
   const s = S.settings;
-  $("maxColors").value = String(s.maxColors); $("mmPer").value = s.mm; $("mPer").value = s.m; $("lockRoom").checked = s.locked; $("studentWarn").checked = !!s.showWarnings;
+  $("maxColors").value = String(s.maxColors); $("mmPer").value = s.mm; $("mPer").value = s.m; $("lockRoom").checked = s.locked; $("studentWarn").checked = !!s.showWarnings; $("oneColor").checked = !!s.oneColor;
   const sc = s.schedule; $("hoursOn").checked = !!sc; $("hoursDetail").hidden = !sc;
   const days = sc ? sc.days : [1,2,3,4,5];
   for(const b of $("hoursDays").children) b.setAttribute("aria-pressed", String(days.includes(+b.dataset.d)));
@@ -735,7 +770,7 @@ function applySettings(){
 }
 async function enterRoom(room){
   S.room = room;
-  S.settings = {maxColors:room.max_colors, mm:Number(room.mm_per_block), m:Number(room.m_per_block), locked:room.locked, showWarnings:!!room.show_warnings, schedule:scheduleFromRoom(room)};
+  S.settings = {maxColors:room.max_colors, mm:Number(room.mm_per_block), m:Number(room.m_per_block), locked:room.locked, showWarnings:!!room.show_warnings, schedule:scheduleFromRoom(room), oneColor:room.one_color_per_level!==false};
   setWorldSize(room.size || 32); cuts = []; cutsAutoDone = false; editSummary = new Map(); summaryAt = 0;
   replaceWorld(); authors = new Map(); history.length = 0;
   $("roomTitle").textContent = room.name; $("hudCode").textContent = room.code; $("hudCode").hidden=false; setRt("CONNECTING");
@@ -751,7 +786,7 @@ async function enterRoom(room){
 }
 function enterSolo(){
   S.room = null; S.isTeacher = false; S.nick = ""; authors = new Map(); history.length = 0;
-  S.settings = {maxColors:8, mm:5, m:1, locked:false, showWarnings:true, schedule:null};
+  S.settings = {maxColors:8, mm:5, m:1, locked:false, showWarnings:true, schedule:null, oneColor:true};
   $("roomTitle").textContent = "校舎ブロック工房（ひとりで試す）"; $("hudCode").hidden = true; $("hudRt").hidden = true; S.rtStatus = null; $("tCode").textContent="ひとり"; selectTab("make"); closeMenu();
   $("btnCopyLink").hidden = true; $("btnBackRooms").hidden = true; $("lockRoom").parentElement.hidden = true; $("studentWarnRow").hidden = true; $("authorsBox").hidden = true; $("hoursBox").hidden = true;
   $("btnLeave").textContent = "入口に戻る";
@@ -872,18 +907,16 @@ function flushCursor(){
 // ------------------------------------------------------------
 async function remoteApply(changes){ // changes: [{k, before, after}]
   if(!S.room) return true;
-  const ups = [], dels = [];
-  for(const c of changes){ const [x,y,z] = parse(c.k); if(c.after===null) dels.push([x,y,z]); else ups.push({room_id:S.room.id, x,y,z, color:c.after, author:S.nick}); }
-  let error = null;
-  for(let i=0; i<ups.length && !error; i+=1000){ const r = await sb.from("blocks").upsert(ups.slice(i,i+1000)); error = r.error; }
-  if(!error && dels.length){
-    const r = await sb.rpc("delete_blocks", {p_room:S.room.id, p_cells:dels});   // まとめて1回で消す
-    error = r.error || (r.data===0 && S.settings.locked && !S.isTeacher ? {message:"policy"} : null);
-  }
+  const put = [], del = [];
+  for(const c of changes){ const [x,y,z] = parse(c.k); if(c.after===null) del.push([x,y,z]); else put.push([x,y,z,c.after,S.nick]); }
+  // 置く・塗る・消すを1回の取引（トランザクション）で書き込む。途中で失敗したら全部取り消される
+  const r = await sb.rpc("apply_blocks", {p_room:S.room.id, p_put:put, p_del:del});
+  const error = r.error || (del.length && r.data===0 && S.settings.locked && !S.isTeacher ? {message:"policy"} : null);
   if(error){
     for(const c of changes){ if(c.before===null) voxels.delete(c.k); else voxels.set(c.k, c.before); }
     markDirty();
-    toast(/row-level security|policy/i.test(error.message) ? "いまは置けません（ロック中か、使える時間の外です）" : "送信できませんでした: "+error.message);
+    toast(/one_color_per_level/.test(error.message) ? "同じ高さに、ほかの人が先に別の色を置きました。その色に合わせてね"
+        : /row-level security|policy/i.test(error.message) ? "いまは置けません（ロック中か、使える時間の外です）" : "送信できませんでした: "+error.message);
     return false;
   }
   return true;
@@ -929,19 +962,22 @@ function applyRemoteBlocks(p){
 }
 const history = [];
 async function commit(changes){
-  if(!changes.length) return;
-  if(S.room && S.settings.locked && !S.isTeacher){ toast("先生がロック中です"); return; }
+  if(!changes.length) return false;
+  if(S.room && S.settings.locked && !S.isTeacher){ toast("先生がロック中です"); return false; }
+  const v = levelViolation(changes); if(v){ toast(levelMessage(v)); return false; }
   for(const c of changes){
     if(c.after===null) voxels.delete(c.k); else voxels.set(c.k, c.after); if(S.room) authors.set(c.k, S.nick);
     lastEditAt = Date.now();
   }
   history.push(changes); if(history.length>60) history.shift();
   markDirty();
-  if(await remoteApply(changes)){ sendBlocks(changes); logEdits(changes); }
+  if(await remoteApply(changes)){ sendBlocks(changes); logEdits(changes); return true; }
+  return false;
 }
 async function undo(){
   const last = history.pop(); if(!last) return;
   const inverse = last.map(c => ({k:c.k, before:c.after, after:c.before}));
+  const v = levelViolation(inverse); if(v){ history.push(last); toast("戻すと同じ高さに色が混ざるので、戻せません"); return; }
   for(const c of inverse){ if(c.after===null) voxels.delete(c.k); else voxels.set(c.k, c.after); }
   markDirty(); toast("1つ戻しました");
   if(await remoteApply(inverse)){ sendBlocks(inverse); logEdits(inverse); }
@@ -949,11 +985,17 @@ async function undo(){
 async function bulkReplace(newMap){
   if(!S.room){ history.push([...voxels].map(([k,c])=>({k,before:c,after:null})).concat([...newMap].map(([k,c])=>({k,before:null,after:c})))); replaceWorld(newMap); return; }
   if(!S.isTeacher){ toast("先生だけができます"); return; }
+  if(S.settings.oneColor){   // 読み込む作品が「同じ高さには1色だけ」を守っているか、消す前に確かめる
+    const lv=new Map(); for(const [k,c] of newMap){ const h=parse(k)[2]; if(!lv.has(h)) lv.set(h,new Set()); lv.get(h).add(c); }
+    const bad=[...lv].filter(([h,cs])=>cs.size>1).map(([h])=>h).sort((a,b)=>a-b);
+    if(bad.length){ toast(`Y=${bad.join("、")} に色が混ざっているので読み込めません。「同じ高さには1色だけ」をオフにしてから読み込んでください`); return; }
+  }
   const {error} = await sb.rpc("clear_room", {p_room:S.room.id});
   if(error){ toast("消せませんでした: "+error.message); return; }
   replaceWorld(); authors = new Map(); history.length=0;
-  const rows = [...newMap].map(([k,c]) => { const [x,y,z]=parse(k); return {room_id:S.room.id, x,y,z, color:c, author:S.nick||"先生"}; });
-  for(let i=0;i<rows.length;i+=500){ const r = await sb.from("blocks").upsert(rows.slice(i,i+500)); if(r.error){ toast("送信エラー: "+r.error.message); break; } }
+  const put = [...newMap].map(([k,c]) => { const [x,y,z]=parse(k); return [x,y,z,c,S.nick||"先生"]; });
+  const r = await sb.rpc("apply_blocks", {p_room:S.room.id, p_put:put, p_del:[]});
+  if(r.error){ toast("送信エラー: "+r.error.message); return; }
   for(const [k,c] of newMap){ voxels.set(k,c); authors.set(k,S.nick||"先生"); }
   markDirty();
   S.channel?.send({type:"broadcast", event:"reload", payload:{}});   // 全員に「読み込み直して」と知らせる
@@ -965,15 +1007,15 @@ async function teacherSettingsChanged(){
   const schedule = $("hoursOn").checked && days.length && $("hoursFrom").value && $("hoursUntil").value && $("hoursFrom").value < $("hoursUntil").value
     ? {days, from:$("hoursFrom").value, until:$("hoursUntil").value} : null;
   if($("hoursOn").checked && !schedule) toast("曜日を1つ以上選び、「から」より「まで」を遅い時刻にしてください");
-  S.settings = {maxColors:parseInt($("maxColors").value,10), mm:parseFloat($("mmPer").value)||5, m:parseFloat($("mPer").value)||1, locked:$("lockRoom").checked, showWarnings:$("studentWarn").checked, schedule};
+  S.settings = {maxColors:parseInt($("maxColors").value,10), mm:parseFloat($("mmPer").value)||5, m:parseFloat($("mPer").value)||1, locked:$("lockRoom").checked, showWarnings:$("studentWarn").checked, schedule, oneColor:$("oneColor").checked};
   applySettings();
   if(!S.room){ store.set("kousha-solo-settings", JSON.stringify(S.settings)); return; }
-  const {error} = await sb.from("rooms").update({max_colors:S.settings.maxColors, mm_per_block:S.settings.mm, m_per_block:S.settings.m, locked:S.settings.locked, show_warnings:S.settings.showWarnings,
+  const {error} = await sb.from("rooms").update({max_colors:S.settings.maxColors, mm_per_block:S.settings.mm, m_per_block:S.settings.m, locked:S.settings.locked, show_warnings:S.settings.showWarnings, one_color_per_level:S.settings.oneColor,
     open_days:schedule?schedule.days:null, open_from:schedule?schedule.from:null, open_until:schedule?schedule.until:null}).eq("id", S.room.id);
   if(error){ toast("設定を保存できませんでした: "+error.message); return; }
   S.channel?.send({type:"broadcast", event:"settings", payload:S.settings});
 }
-for(const id of ["maxColors","mmPer","mPer","lockRoom","studentWarn","hoursFrom","hoursUntil"]) $(id).addEventListener("change", teacherSettingsChanged);
+for(const id of ["maxColors","mmPer","mPer","lockRoom","studentWarn","oneColor","hoursFrom","hoursUntil"]) $(id).addEventListener("change", teacherSettingsChanged);
 $("hoursOn").addEventListener("change", () => { $("hoursDetail").hidden = !$("hoursOn").checked; teacherSettingsChanged(); });
 for(const b of $("hoursDays").children) b.addEventListener("click", () => { b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed")!=="true")); teacherSettingsChanged(); });
 
@@ -994,10 +1036,12 @@ function buildSample(){
   }
   v.delete(key(X0+7,Y0+D-1,0)); v.delete(key(X0+8,Y0+D-1,0));
   box(X0,Y0,6,X0+W-1,Y0+D-1,6,1);
+  // 体育館: 壁は3段（白）、屋根は校舎の2階の床と同じ高さ（Y=3）で同じ色（石）→ 高さごとに1色になる
   const GX=X0+W+2, GY=Y0-1;
-  for(let i=GX;i<GX+8;i++) for(let j=GY;j<GY+7;j++) for(let k=0;k<4;k++) if(i===GX||i===GX+7||j===GY||j===GY+6) set(i,j,k,0);
-  box(GX,GY,4,GX+7,GY+6,4,2); box(GX,GY+1,5,GX+7,GY+5,5,2); box(GX,GY+2,6,GX+7,GY+4,6,2);
-  box(X0+W,Y0+2,0,X0+W+1,Y0+2,1,0); box(X0+W,Y0+3,0,X0+W+1,Y0+3,1,0); box(X0+W,Y0+2,2,X0+W+1,Y0+3,2,1);
+  for(let i=GX;i<GX+8;i++) for(let j=GY;j<GY+7;j++) for(let k=0;k<3;k++) if(i===GX||i===GX+7||j===GY||j===GY+6) set(i,j,k,0);
+  box(GX,GY,3,GX+7,GY+6,3,2);
+  // 渡り廊下: 壁2段と屋根（Y=2）すべて白
+  box(X0+W,Y0+2,0,X0+W+1,Y0+2,1,0); box(X0+W,Y0+3,0,X0+W+1,Y0+3,1,0); box(X0+W,Y0+2,2,X0+W+1,Y0+3,2,0);
   return v;
 }
 
@@ -1024,11 +1068,17 @@ function findFloating(src){
   const out=new Set(); for(const k of src.keys()) if(!seen.has(k)) out.add(k); return out;
 }
 function findOverhang(src){ const out=new Set(); for(const k of src.keys()){ const [i,j,h]=parse(k); if(h>0 && !src.has(key(i,j,h-1))) out.add(k); } return out; }
+// 中を詰める: 各マスで、一番上のブロックから地面までを埋める。
+// 埋める色は「その高さでいちばん多い色」（＝段の色）。上の色で下まで埋めると、段の中に色が混ざって色の交換が増えるため
 function filledVoxels(src){
-  const top=new Map();
-  for(const [k,c] of src){ const [i,j,h]=parse(k); const t=top.get(`${i},${j}`); if(!t||h>t.h) top.set(`${i},${j}`,{h,c}); }
+  const top=new Map(), lv=new Map();
+  for(const [k,c] of src){
+    const [i,j,h]=parse(k); const t=top.get(`${i},${j}`); if(!t||h>t.h) top.set(`${i},${j}`,{h,c});
+    let m=lv.get(h); if(!m){ m=new Map(); lv.set(h,m); } m.set(c,(m.get(c)||0)+1);
+  }
+  const levelColor=new Map([...lv].map(([h,m])=>[h,[...m].sort((a,b)=>b[1]-a[1])[0][0]]));
   const v=new Map(src);
-  for(const [ij,{h,c}] of top){ const [i,j]=ij.split(",").map(Number); for(let z=0;z<h;z++){ const kk=key(i,j,z); if(!v.has(kk)) v.set(kk,c); } }
+  for(const [ij,{h,c}] of top){ const [i,j]=ij.split(",").map(Number); for(let z=0;z<h;z++){ const kk=key(i,j,z); if(!v.has(kk)) v.set(kk, levelColor.has(z)?levelColor.get(z):c); } }
   return v;
 }
 function buildSTL(src, mm){
@@ -1106,7 +1156,7 @@ const voxMat=new THREE.MeshBasicMaterial({map:blockTex, vertexColors:true});
 const chunkMeshes=new Map();   // 区画 → その区画の形（Mesh）
 let maxDist=140;               // ズームで引ける最大距離（広さで変える）
 function replaceWorld(entries){   // 作業台の中身をまるごと入れ替える
-  chunkIndex.clear(); dirtyChunks.clear();
+  chunkIndex.clear(); dirtyChunks.clear(); levelCounts.clear();
   for(const m of chunkMeshes.values()){ scene.remove(m); m.geometry.dispose(); } chunkMeshes.clear();
   voxels = new VoxelMap(entries || []);
   floating = new Set(); overhang = new Set();
@@ -1221,19 +1271,22 @@ function updateRangePreview(){
   rangeBox3.visible = mode==="range";
   const nf=rangeFillCells().length, nc=rangeClearKeys().length, lim=rangeLimit(), reach=rangeInReach();
   let msg=`${sx} × ${sy} × ${sz}（X×Y×Z）。埋めると ${nf.toLocaleString("ja-JP")} 個、空にすると ${nc.toLocaleString("ja-JP")} 個`;
+  const lv = nf>0 && nf<=lim ? levelViolation(rangeFillChanges()) : null;
   if(!reach) msg+="。範囲が白い円からはみ出しています";
   else if(nf>lim || nc>lim) msg+=`。一度に変えられるのは ${lim.toLocaleString("ja-JP")} 個までです`;
+  else if(lv) msg+=`。この色で埋めると、Y=${lv.h} に色が混ざります（その高さ全体を囲めば、塗り替えられます）`;
   info.textContent=msg;
-  $("btnRangeFill").disabled = !reach || nf>lim || nf===0; $("btnRangeClear").disabled = !reach || nc>lim || nc===0;
+  $("btnRangeFill").disabled = !reach || nf>lim || nf===0 || !!lv; $("btnRangeClear").disabled = !reach || nc>lim || nc===0;
   if($("onlyRange").checked && !$("tabExport").hidden) refreshParts();
+}
+function rangeFillChanges(){
+  const out=[]; for(const [i,j,h] of rangeFillCells()){ const k=key(i,j,h), b=voxels.has(k)?voxels.get(k):null; if(b!==color) out.push({k,before:b,after:color}); } return out;
 }
 async function rangeApply(fill){
   updateRangePreview(); if($(fill?"btnRangeFill":"btnRangeClear").disabled) return;
-  const changes=[];
-  if(fill){ for(const [i,j,h] of rangeFillCells()){ const k=key(i,j,h), b=voxels.has(k)?voxels.get(k):null; if(b!==color) changes.push({k,before:b,after:color}); } }
-  else { for(const k of rangeClearKeys()) changes.push({k,before:voxels.get(k),after:null}); }
+  const changes = fill ? rangeFillChanges() : rangeClearKeys().map(k=>({k,before:voxels.get(k),after:null}));
   if(!changes.length){ toast("変わるブロックはありません"); return; }
-  await commit(changes);   // まとめて1回の操作。「1つ戻す」で全部まとめて戻せる
+  if(!await commit(changes)) return;   // まとめて1回の操作。「1つ戻す」で全部まとめて戻せる
   toast(fill ? `${changes.length.toLocaleString("ja-JP")}個埋めました` : `${changes.length.toLocaleString("ja-JP")}個空にしました`);
   updateRangePreview();
 }
@@ -1532,7 +1585,10 @@ function updateGhost(cx,cy){
   if(!cell||!inBounds(...cell)){ ghost.visible=false; return; }
   lastHoverAt = Date.now(); $("coord").textContent = fmtCell(cell);
   ghost.visible=true; ghost.position.set(cell[0]-OFF+0.5,cell[2]+0.5,cell[1]-OFF+0.5);
-  ghost.material.color.set(mode!=="move" && !inReach(cell[0],cell[1]) ? 0xd94f3a : 0x000000);  // 届かない場所は赤い枠
+  // 届かない場所、置くと同じ高さに色が混ざる場所は赤い枠
+  const kk=key(...cell), before=voxels.has(kk)?voxels.get(kk):null;
+  const mixes = (mode==="place" && before===null) || (mode==="paint" && before!==null) ? !!levelViolation([{k:kk, before, after:color}]) : false;
+  ghost.material.color.set(mode!=="move" && (!inReach(cell[0],cell[1]) || mixes) ? 0xd94f3a : 0x000000);
 }
 canvas.addEventListener("contextmenu",e=>e.preventDefault());
 canvas.addEventListener("pointerdown",e=>{ if(isMenuOpen()){ closeMenu(); return; } canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
@@ -1569,7 +1625,7 @@ function setMode(m){ mode=m; for(const [k,id] of Object.entries(modeBtns)) $(id)
 for(const [k,id] of Object.entries(modeBtns)) $(id).addEventListener("click",()=>setMode(k));
 setMode("place");
 const sw=$("swatches");
-function selectColor(idx){ color=idx; [...sw.children].forEach((x,i)=>x.setAttribute("aria-pressed",String(i===idx))); }
+function selectColor(idx){ color=idx; [...sw.children].forEach((x,i)=>x.setAttribute("aria-pressed",String(i===idx))); if(mode==="range") updateRangePreview(); }
 PALETTE.forEach((c,idx)=>{ const b=document.createElement("button"); b.className="swatch"; b.style.background=c.hex; b.setAttribute("aria-label",c.name); b.innerHTML=`<span>${c.name}</span>`; b.addEventListener("click",()=>selectColor(idx)); sw.appendChild(b); });
 selectColor(0);
 $("showFloat").addEventListener("change",rebuildAll);
@@ -1596,6 +1652,9 @@ function updateStats(){
   for(const [k,c] of src){ const h=parse(k)[2]; if(!perLevel.has(h)) perLevel.set(h,new Set()); perLevel.get(h).add(c); }
   let swaps=0; const mixed=[]; let prev=null;
   for(const h of [...perLevel.keys()].sort((a,b)=>a-b)){ const set=perLevel.get(h); if(set.size>1){ swaps+=(set.size-1)*layersPerBlock; mixed.push(h+1); } else if(prev&&!prev.has([...set][0])) swaps+=1; prev=set; }
+  const mx = mixedLevels(), on=$("oneColorNote");
+  on.hidden = !(S.settings.oneColor && mx.length);
+  on.textContent = mx.length ? `今、Y=${mx.join("、")} に色が混ざっています。「範囲」でその高さ全体を囲んで1色に塗ると直せます（消すことはいつでもできます）。` : "";
   const sf=$("swapFlag"); $("swapCount").textContent=swaps.toLocaleString("ja-JP"); sf.classList.toggle("bad",mixed.length>0);
   sf.lastElementChild.textContent=swaps===0?"色の交換はありません":mixed.length?`回の色交換 ≈ +${fmt(swaps*1.5)}分。${mixed.length}段で色が混ざっています`:`回だけ（段の境目）≈ +${fmt(swaps*1.5)}分`;
   $("swapNote").textContent=mixed.length?`混ざっている段: 下から ${mixed.join("、")} 段目。段ごとに1色にすると交換が激減します。`:"";
