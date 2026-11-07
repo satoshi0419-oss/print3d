@@ -1555,6 +1555,7 @@ let mode="place", color=0;
 const pointers=new Map(); let dragging=false, downPos=null, downButton=0, lastPinch=0, lastMid=null;
 const ray=new THREE.Raycaster(), ndc=new THREE.Vector2();
 function pick(cx,cy){
+  camera.updateMatrixWorld();   // 描画が止まっていても、カメラの位置・向きを最新にしてから計算する
   const r=canvas.getBoundingClientRect(); ndc.set(((cx-r.left)/r.width)*2-1, -((cy-r.top)/r.height)*2+1); ray.setFromCamera(ndc,camera);
   const hits=ray.intersectObjects([...chunkMeshes.values(), ground]); if(!hits.length) return null;
   const h=hits[0], p=h.point;
