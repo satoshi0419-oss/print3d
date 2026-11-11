@@ -104,9 +104,7 @@ textarea{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radi
 /* ズーム倍率（タップで1倍に戻す）。ミニマップがあるときはその下に置く */
 .zoomchip{position:absolute;right:max(12px,env(safe-area-inset-right,0px));top:calc(64px + env(safe-area-inset-top,0px));z-index:5;display:flex;align-items:center;gap:5px;padding:6px 11px;border:0;border-radius:999px;background:color-mix(in srgb,var(--panel) 90%,transparent);color:var(--fg);font:inherit;font-size:13px;font-variant-numeric:tabular-nums;box-shadow:0 2px 6px rgba(0,0,0,.2);cursor:pointer}
 .zoomchip svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
-.zoomchip.zoomed{background:var(--accent);color:var(--accent-fg)}
-.zoomchip .reset{display:none;font-size:12px;opacity:.9}
-.zoomchip.zoomed .reset{display:inline}
+.zoomchip .reset{font-size:12px;opacity:.85}
 #btnShape span{white-space:nowrap;font-size:10px;letter-spacing:-.02em}
 .zoomchip.withmini{top:calc(64px + 160px + 8px + env(safe-area-inset-top,0px))}
 @media (max-width:760px){.zoomchip.withmini{top:calc(64px + 112px + 8px + env(safe-area-inset-top,0px))}}
@@ -279,7 +277,7 @@ section{display:flex;flex-direction:column;gap:8px}
     <div class="notices" id="notices"></div>
     <div class="coord" id="coord">X — ・ Y — ・ Z —</div>
     <canvas class="minimap" id="minimap" width="320" height="320" hidden title="タップでその場所へ移動"></canvas>
-    <button class="zoomchip" id="zoomChip" title="ズームの倍率。タップで1倍に戻す（0キーでも戻せます）"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg><span id="zoomVal">1.0倍</span><span class="reset">｜1倍に戻す</span></button>
+    <button class="zoomchip" id="zoomChip" title="ズームの倍率（地面に立った目線が1倍）。タップで1倍 ⇔ 全体を見る（0キーで1倍）"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg><span id="zoomVal">1.0倍</span><span class="reset" id="zoomReset">｜1倍にする</span></button>
     <div class="hud">
       <h1 id="roomTitle">校舎ブロック工房</h1>
       <span class="pill code" id="hudCode" hidden></span>
@@ -1181,7 +1179,8 @@ border.rotation.x=-Math.PI/2; border.position.y=0.01; scene.add(border);
 const voxMat=new THREE.MeshBasicMaterial({map:blockTex, vertexColors:true});
 const chunkMeshes=new Map();   // 区画 → その区画の形（Mesh）
 let maxDist=140;               // ズームで引ける最大距離（広さで変える）
-let baseDist=40;               // 「1倍」のときのカメラの距離（作業台の広さで決まる）
+let baseDist=40;               // 部屋に入ったときの、全体が見えるカメラの距離（作業台の広さで決まる）
+const GROUND_DIST=6;           // いちばん近づいた距離＝地面に立って見ている感じ。これを「1倍」とする（マインクラフトの目線）
 function replaceWorld(entries){   // 作業台の中身をまるごと入れ替える
   chunkIndex.clear(); dirtyChunks.clear(); levelCounts.clear();
   for(const m of chunkMeshes.values()){ scene.remove(m); m.geometry.dispose(); } chunkMeshes.clear();
@@ -1569,19 +1568,21 @@ function restoreSolo(){
 // target = カメラが見ている点（＝画面の中心＝白い点）。ふだんは地面（高さ 0）。スペース／Shift キーで上下できる
 const cam={target:new THREE.Vector3(0,0,0),theta:Math.PI/4,phi:1.08,dist:40};
 function updateCamera(){ const s=Math.sin(cam.phi); camera.position.set(cam.target.x+cam.dist*s*Math.sin(cam.theta), cam.target.y+cam.dist*Math.cos(cam.phi), cam.target.z+cam.dist*s*Math.cos(cam.theta)); camera.lookAt(cam.target); showZoom(); }
-// ズーム倍率 = 1倍の距離 ÷ 今の距離（近づくほど大きい）。1倍からずれているときはボタンの色を変えて目立たせる
+// ズーム倍率 = 地面に立った距離 ÷ 今の距離。地面の目線が1倍、引いて見るほど小さくなる（全体を見ると 0.06倍 など）
+// ボタンを押すと、1倍のときは「全体を見る」、それ以外は「1倍（地面の目線）」に切りかわる
 var shownZoom="";   /* var: 起動直後、この行より先に updateCamera が呼ばれても動くように */
 function showZoom(){
-  const z=baseDist/cam.dist, txt=(z>=9.95?Math.round(z):z.toFixed(1))+"倍";
+  const z=GROUND_DIST/cam.dist, atOne=z>0.97, txt=(atOne?"1":z>=0.095?z.toFixed(1):z.toFixed(2))+"倍";
   if(txt===shownZoom) return; shownZoom=txt;
-  $("zoomVal").textContent=txt; $("zoomChip").classList.toggle("zoomed", txt!=="1.0倍");
+  $("zoomVal").textContent=txt; $("zoomReset").textContent = atOne ? "｜全体を見る" : "｜1倍にする";
 }
-function resetZoom(){
+function zoomTo(to){
   const from=cam.dist, t0=performance.now();
-  (function step(){ const k=Math.min(1,(performance.now()-t0)/300), e=1-Math.pow(1-k,3);
-    cam.dist=from+(baseDist-from)*e; updateCamera(); if(k<1) requestAnimationFrame(step); })();
+  (function step(){ const k=Math.min(1,(performance.now()-t0)/350), e=1-Math.pow(1-k,3);
+    cam.dist=from+(to-from)*e; updateCamera(); if(k<1) requestAnimationFrame(step); })();
 }
-$("zoomChip").addEventListener("click", resetZoom);
+function resetZoom(){ zoomTo(GROUND_DIST); }
+$("zoomChip").addEventListener("click", () => zoomTo(GROUND_DIST/cam.dist>0.97 ? baseDist : GROUND_DIST));
 function orbit(dx,dy){ cam.theta-=dx*0.006; cam.phi=Math.min(Math.PI/2-0.02,Math.max(0.15,cam.phi-dy*0.006)); updateCamera(); }
 function clampTarget(){ const L=OFF+2; cam.target.x=Math.max(-L,Math.min(L,cam.target.x)); cam.target.z=Math.max(-L,Math.min(L,cam.target.z)); cam.target.y=Math.max(0,Math.min(H,cam.target.y)); }
 // ずらす: 地図を引っぱるように、地面に沿って動かす（上下には動かさない）
@@ -1591,7 +1592,7 @@ function pan(dx,dy){
   const k=cam.dist*0.0016, depth=1/Math.max(0.35,Math.cos(cam.phi));   // 奥行き方向は斜めに見ている分だけ多めに動かす
   cam.target.addScaledVector(right,-dx*k); cam.target.addScaledVector(fwd,dy*k*depth); clampTarget(); updateCamera();
 }
-function zoom(f){ cam.dist=Math.min(maxDist,Math.max(6,cam.dist*f)); updateCamera(); }
+function zoom(f){ cam.dist=Math.min(maxDist,Math.max(GROUND_DIST,cam.dist*f)); updateCamera(); }
 
 // ---- 入力 ----
 let mode="place", color=0, shape=0;   // shape: 0=ブロック、1=下ハーフ
