@@ -115,7 +115,11 @@ textarea{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radi
 .peer{cursor:pointer}
 .peer:hover{border-color:var(--fg)}
 .hud h1{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:2px 12px;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:min(520px,calc(100vw - 160px))}
-.hint{position:absolute;left:max(16px,env(safe-area-inset-left,0px));top:calc(90px + env(safe-area-inset-top,0px));max-width:calc(100% - 210px);background:color-mix(in srgb,var(--panel) 88%,transparent);border-radius:8px;color:var(--fg)!important;padding:4px 10px;font-size:12px;pointer-events:none}
+.hint.hide{opacity:0}
+/* 操作のヒントを開く「?」ボタン。ヒントはしばらくすると消え、操作を始めるとすぐ消える */
+.hintbtn{position:absolute;left:max(16px,env(safe-area-inset-left,0px));top:calc(88px + env(safe-area-inset-top,0px));width:26px;height:26px;border-radius:50%;border:0;padding:0;background:color-mix(in srgb,var(--panel) 88%,transparent);color:var(--fg);font:inherit;font-size:14px;font-weight:700;cursor:pointer;z-index:5}
+.hintbtn[aria-expanded="true"]{background:var(--accent);color:var(--accent-fg)}
+.hint{position:absolute;left:calc(max(16px,env(safe-area-inset-left,0px)) + 34px);top:calc(90px + env(safe-area-inset-top,0px));max-width:calc(100% - 244px);transition:opacity .35s;background:color-mix(in srgb,var(--panel) 88%,transparent);border-radius:8px;color:var(--fg)!important;padding:4px 10px;font-size:12px;pointer-events:none}
 .toast{position:absolute;left:50%;bottom:calc(140px + env(safe-area-inset-bottom,0px));z-index:15;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%}
 .toast.show{opacity:.95}
 /* メニュー（引き出し）: ふだんは右の外に隠れていて、メニューボタンで出てくる */
@@ -201,7 +205,8 @@ section{display:flex;flex-direction:column;gap:8px}
 @media (max-width:760px){
   .roomrow{grid-template-columns:1fr;}
   .tool,.hotbar .swatch{width:44px;height:44px}
-  .hint{display:none}
+  .hint{max-width:calc(100% - 66px);top:calc(110px + env(safe-area-inset-top,0px))}
+  .hintbtn{top:calc(108px + env(safe-area-inset-top,0px))}
   .floatcard{bottom:calc(196px + env(safe-area-inset-bottom,0px))}
   .toast{bottom:calc(190px + env(safe-area-inset-bottom,0px))}
 }
@@ -286,7 +291,7 @@ section{display:flex;flex-direction:column;gap:8px}
       <span class="pill hudpill-float" id="hudFloat" hidden></span>
       <div class="peers" id="peers"></div>
     </div>
-    <div class="hint" id="hint"></div>
+    <button class="hintbtn" id="hintBtn" aria-expanded="false" aria-controls="hint" title="操作のヒント">?</button><div class="hint hide" id="hint"></div>
     <div class="toast" id="toast"></div>
     <div class="floatcard" id="rangeBox" hidden>
         <div class="label">範囲で埋める</div>
@@ -458,7 +463,7 @@ const CFG = window.KOUSHA_CONFIG || {};
 const sb = (CFG.supabaseUrl && CFG.supabaseAnonKey) ? supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
 
 // 画面の切り替え
-function show(id){ for(const s of ["scrHome","scrTeacher","scrEditor"]) $(s).hidden = s!==id; if(id==="scrEditor") requestAnimationFrame(resize); }
+function show(id){ for(const s of ["scrHome","scrTeacher","scrEditor"]) $(s).hidden = s!==id; if(id==="scrEditor"){ requestAnimationFrame(resize); setTimeout(()=>showHint(5000), 300); } }
 
 // ============================================================
 // セッション状態: いまどの部屋にいて、自分は誰か
@@ -1707,7 +1712,7 @@ let mcMouse = store.get("kousha-mcmouse")==="1", lastPtr = "mouse";
 $("mcMouse").checked = mcMouse;
 $("mcMouse").addEventListener("change", () => { mcMouse = $("mcMouse").checked; store.set("kousha-mcmouse", mcMouse ? "1" : "0"); setMode(mode); });
 function mcActive(){ return mcMouse && lastPtr==="mouse" && (mode==="place" || mode==="erase"); }
-canvas.addEventListener("pointerdown",e=>{ lastPtr=e.pointerType; sfx.unlock(); if(isMenuOpen()){ closeMenu(); return; } canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+canvas.addEventListener("pointerdown",e=>{ lastPtr=e.pointerType; sfx.unlock(); hideHint(); if(isMenuOpen()){ closeMenu(); return; } canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pointers.size===1){ dragging=false; downPos={x:e.clientX,y:e.clientY}; downButton=e.button; }
   if(pointers.size===2){ const [a,b]=[...pointers.values()]; lastPinch=Math.hypot(a.x-b.x,a.y-b.y); lastMid={x:(a.x+b.x)/2,y:(a.y+b.y)/2}; dragging=true; } });
 canvas.addEventListener("pointermove",e=>{ lastPtr=e.pointerType;
@@ -1736,7 +1741,7 @@ function typingNow(e){ return ["INPUT","SELECT","TEXTAREA"].includes(e.target.ta
 document.addEventListener("keydown", e => {
   if(!WALK_KEYS[e.code] || typingNow(e) || e.ctrlKey || e.metaKey || e.altKey) return;
   if(e.code==="Space") e.preventDefault();   // スペースで、選んでいたボタンが押されたり画面がスクロールしたりしないように
-  heldKeys.add(e.code);
+  heldKeys.add(e.code); hideHint();
 });
 document.addEventListener("keyup", e => { heldKeys.delete(e.code); if(e.code==="Space" && !typingNow(e)) e.preventDefault(); });
 window.addEventListener("blur", () => heldKeys.clear());   // 別の画面に切りかえたら止まる（押しっぱなしのまま動き続けないように）
@@ -1752,6 +1757,12 @@ function walk(){
   clampTarget(); updateCamera();
 }
 
+// ---- 操作のヒント: ふだんは「?」だけ。部屋に入ったとき・道具を変えたときに数秒だけ出て、操作を始めたら消える ----
+var hintTimer=null;
+function showHint(ms){ $("hint").classList.remove("hide"); $("hintBtn").setAttribute("aria-expanded","true"); clearTimeout(hintTimer); hintTimer=setTimeout(hideHint, ms); }
+function hideHint(){ clearTimeout(hintTimer); $("hint").classList.add("hide"); $("hintBtn").setAttribute("aria-expanded","false"); }
+$("hintBtn").addEventListener("click", () => $("hint").classList.contains("hide") ? showHint(8000) : hideHint());
+
 // ---- パネル ----
 const modeBtns={place:"mPlace",erase:"mErase",paint:"mPaint",range:"mRange",move:"mMove"};
 function setMode(m){ mode=m; for(const [k,id] of Object.entries(modeBtns)) $(id).setAttribute("aria-pressed",String(k===m));
@@ -1763,7 +1774,7 @@ function setMode(m){ mode=m; for(const [k,id] of Object.entries(modeBtns)) $(id)
     : m==="range" ? "2か所タップして範囲を決めます（はじめ → おわり）"+reach
     : "行きたい場所をタップすると、そこへ移動します";
   $("rangeBox").hidden = m!=="range"; rangeBox3.visible = m==="range" && !!rangeBounds(); if(m==="range") updateRangePreview(); }
-for(const [k,id] of Object.entries(modeBtns)) $(id).addEventListener("click",()=>setMode(k));
+for(const [k,id] of Object.entries(modeBtns)) $(id).addEventListener("click",()=>{ setMode(k); showHint(3500); });   // 道具を変えたら、その使い方を少しだけ見せる
 setMode("place");
 // 形の切りかえ（ブロック ⇔ 下ハーフ）。1つのボタンを押すたびに入れかわる
 function setShape(s){ shape=s; const b=$("btnShape"); b.setAttribute("aria-pressed",String(!!s)); b.querySelector("span").textContent = s ? "ハーフ" : "ブロック";
