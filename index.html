@@ -1210,7 +1210,7 @@ const fmtCell = c => `X ${c[0]} ・ Y ${c[2]} ・ Z ${c[1]}`;
 let lastHoverAt = 0;
 setInterval(() => {   // マウスを乗せていないとき（指で操作しているとき）は、自分のいる場所を出す
   if(Date.now()-lastHoverAt < 1500 || $("scrEditor").hidden) return;
-  const p=myPosCell(); $("coord").textContent = `いる場所 X ${p[0]} ・ Z ${p[1]}`;
+  const p=myPosCell(), y=Math.round(cam.target.y); $("coord").textContent = `いる場所 X ${p[0]} ・ Z ${p[1]}` + (y>0 ? ` ・ 高さ Y ${y}` : "");
 }, 500);
 const labelGroup=new THREE.Group(); scene.add(labelGroup);   // 目盛り（X・Z）
 const compassGroup=new THREE.Group(); scene.add(compassGroup); // 方角（北・南・東・西）
@@ -1326,7 +1326,7 @@ const _v = new THREE.Vector3();
 function updateAvatars(){
   const box=$("avatars"); const r=canvas.getBoundingClientRect(); if(!r.width) return;
   updateNotices(r);
-  reachRing.visible = reachApplies(); reachRing.position.x = cam.target.x; reachRing.position.z = cam.target.z;
+  reachRing.visible = reachApplies(); reachRing.position.set(cam.target.x, cam.target.y+0.03, cam.target.z);   // 上に上がったら円もいっしょに上がる
   const now=Date.now(), groups=new Map();
   for(const p of peers.values()){ if(!p.cell) continue; const ck=p.cell.join(","); if(!groups.has(ck)) groups.set(ck,[]); groups.get(ck).push(p); }
   for(const [ck,el] of avatarEls) if(!groups.has(ck)){ el.remove(); avatarEls.delete(ck); }
@@ -1405,7 +1405,7 @@ $("showDummy").addEventListener("change", applyDummy);
 $("showTags").addEventListener("change", () => { $("avatars").hidden = !tagsOn(); syncPeerGhosts(); });
 
 function flyTo(cell){
-  const target=new THREE.Vector3(cell[0]-OFF+0.5, 0, cell[1]-OFF+0.5);   // 移動先も地面の点
+  const target=new THREE.Vector3(cell[0]-OFF+0.5, cam.target.y, cell[1]-OFF+0.5);   // 高さは今のまま
   const from=cam.target.clone(), fromDist=cam.dist, toDist=Math.min(cam.dist,22), t0=performance.now();
   (function step(){ const k=Math.min(1,(performance.now()-t0)/450), e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
     cam.target.lerpVectors(from,target,e); cam.dist=fromDist+(toDist-fromDist)*e; updateCamera(); if(k<1) requestAnimationFrame(step); })();
@@ -1550,11 +1550,11 @@ function restoreSolo(){
 }
 
 // ---- カメラ ----
-// target = カメラが見ている地面の点（＝画面の中心＝白い点）。高さは常に 0
+// target = カメラが見ている点（＝画面の中心＝白い点）。ふだんは地面（高さ 0）。スペース／Shift キーで上下できる
 const cam={target:new THREE.Vector3(0,0,0),theta:Math.PI/4,phi:1.08,dist:40};
 function updateCamera(){ const s=Math.sin(cam.phi); camera.position.set(cam.target.x+cam.dist*s*Math.sin(cam.theta), cam.target.y+cam.dist*Math.cos(cam.phi), cam.target.z+cam.dist*s*Math.cos(cam.theta)); camera.lookAt(cam.target); }
 function orbit(dx,dy){ cam.theta-=dx*0.006; cam.phi=Math.min(Math.PI/2-0.02,Math.max(0.15,cam.phi-dy*0.006)); updateCamera(); }
-function clampTarget(){ const L=OFF+2; cam.target.x=Math.max(-L,Math.min(L,cam.target.x)); cam.target.z=Math.max(-L,Math.min(L,cam.target.z)); cam.target.y=0; }
+function clampTarget(){ const L=OFF+2; cam.target.x=Math.max(-L,Math.min(L,cam.target.x)); cam.target.z=Math.max(-L,Math.min(L,cam.target.z)); cam.target.y=Math.max(0,Math.min(H,cam.target.y)); }
 // ずらす: 地図を引っぱるように、地面に沿って動かす（上下には動かさない）
 function pan(dx,dy){
   const fwd=new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y=0; fwd.normalize();
@@ -1629,7 +1629,7 @@ canvas.addEventListener("pointermove",e=>{
   if(dragging){ ghost.visible=false; if(downButton===2) pan(dx,dy); else orbit(dx,dy); } else updateGhost(e.clientX,e.clientY);
 });
 function endPointer(e){ const wasSingle=pointers.size===1; pointers.delete(e.pointerId);
-  if(wasSingle&&!dragging&&downPos){ act(e.clientX,e.clientY,downButton===2||e.shiftKey); updateGhost(e.clientX,e.clientY); }
+  if(wasSingle&&!dragging&&downPos){ act(e.clientX,e.clientY,downButton===2);   /* Shift は「下がる」に使うので、Shift+クリックで消す機能はなし */ updateGhost(e.clientX,e.clientY); }
   if(pointers.size<2){ lastPinch=0; lastMid=null; } if(pointers.size===0){ dragging=false; downPos=null; } }
 canvas.addEventListener("pointerup",endPointer); canvas.addEventListener("pointercancel",endPointer);
 canvas.addEventListener("pointerleave",()=>{ if(pointers.size===0) ghost.visible=false; });
@@ -1638,11 +1638,35 @@ document.addEventListener("keydown",e=>{ if(["INPUT","SELECT","TEXTAREA"].includ
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); }
   if(e.key==="1") setMode("place"); if(e.key==="2") setMode("erase"); if(e.key==="3") setMode("paint"); if(e.key==="4") setMode("range"); if(e.key==="5") setMode("move"); if(e.key.toLowerCase()==="q") setShape(shape?0:1); });
 
+// ---- キーボードで歩く（マインクラフトと同じ）: W 前 / S 後ろ / A 左 / D 右 / スペース 上 / Shift 下 ----
+// 押している間ずっと動く。「前」は今見ている向き（地面に沿って）
+const heldKeys = new Set(); let lastWalk = performance.now();
+const WALK_KEYS = {KeyW:1, KeyA:1, KeyS:1, KeyD:1, Space:1, ShiftLeft:1, ShiftRight:1};
+function typingNow(e){ return ["INPUT","SELECT","TEXTAREA"].includes(e.target.tagName) || $("scrEditor").hidden || !$("fbOverlay").hidden; }
+document.addEventListener("keydown", e => {
+  if(!WALK_KEYS[e.code] || typingNow(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+  if(e.code==="Space") e.preventDefault();   // スペースで、選んでいたボタンが押されたり画面がスクロールしたりしないように
+  heldKeys.add(e.code);
+});
+document.addEventListener("keyup", e => { heldKeys.delete(e.code); if(e.code==="Space" && !typingNow(e)) e.preventDefault(); });
+window.addEventListener("blur", () => heldKeys.clear());   // 別の画面に切りかえたら止まる（押しっぱなしのまま動き続けないように）
+function walk(){
+  const now = performance.now(), dt = Math.min(0.1, (now-lastWalk)/1000); lastWalk = now;
+  if(!heldKeys.size || exploded) return;
+  const fwd=new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y=0; fwd.normalize();
+  const right=new THREE.Vector3().crossVectors(fwd,new THREE.Vector3(0,1,0)).normalize();
+  const sp = Math.max(6, cam.dist*0.35) * dt;   // 遠くから見ているときは速く、近いときはゆっくり（1秒に6ブロック以上）
+  const f = (heldKeys.has("KeyW")?1:0) - (heldKeys.has("KeyS")?1:0), r = (heldKeys.has("KeyD")?1:0) - (heldKeys.has("KeyA")?1:0);
+  const u = (heldKeys.has("Space")?1:0) - (heldKeys.has("ShiftLeft")||heldKeys.has("ShiftRight")?1:0);
+  cam.target.addScaledVector(fwd, f*sp); cam.target.addScaledVector(right, r*sp); cam.target.y += u*6*dt;
+  clampTarget(); updateCamera();
+}
+
 // ---- パネル ----
 const modeBtns={place:"mPlace",erase:"mErase",paint:"mPaint",range:"mRange",move:"mMove"};
 function setMode(m){ mode=m; for(const [k,id] of Object.entries(modeBtns)) $(id).setAttribute("aria-pressed",String(k===m));
   const reach = reachApplies() ? "　白い円の中だけ届きます" : "";
-  $("hint").textContent = m==="place" ? "タップ（クリック）で置く　ドラッグで回す　2本指（ホイール）で拡大"+reach
+  $("hint").textContent = m==="place" ? "タップ（クリック）で置く　ドラッグで回す　2本指（ホイール）で拡大"+(matchMedia("(pointer: fine)").matches ? "　WASDで歩く　スペース／Shiftで上下" : "")+reach
     : m==="erase" ? "ブロックをタップで消す（パソコンは右クリックでも消せます）"+reach
     : m==="paint" ? "ブロックをタップで選んだ色に塗る"+reach
     : m==="range" ? "2か所タップして範囲を決めます（はじめ → おわり）"+reach
@@ -1869,7 +1893,7 @@ $("btnSample").addEventListener("click",()=>bulkReplace(buildSample()));
 function resize(){ const r=canvas.parentElement.getBoundingClientRect(); if(!r.width) return; renderer.setSize(r.width,r.height,false); camera.aspect=r.width/r.height; camera.updateProjectionMatrix(); }
 new ResizeObserver(resize).observe(canvas.parentElement);
 updateCamera(); buildLabels(); worldReady = true;
-(function loop(){ if(!$("scrEditor").hidden){ renderer.render(scene,camera); updateAvatars(); } requestAnimationFrame(loop); })();
+(function loop(){ if(!$("scrEditor").hidden){ walk(); renderer.render(scene,camera); updateAvatars(); } requestAnimationFrame(loop); })();
 if(location.hash==="#teacher"){ show("scrTeacher"); refreshAuth(); }
 })();
 </script>
