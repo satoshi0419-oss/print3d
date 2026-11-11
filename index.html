@@ -339,6 +339,12 @@ section{display:flex;flex-direction:column;gap:8px}
         <p class="small">「置く」か「消す」を選んでいるときに使えます。この端末だけの設定です。</p>
       </section>
       <section>
+        <div class="label">音</div>
+        <label class="toggle"><input type="checkbox" id="sfxOn" checked> 置く・消す・塗るときの効果音</label>
+        <label class="toggle">音の大きさ <input type="range" id="sfxVol" min="5" max="100" step="5" value="50" style="flex:1;margin-left:8px"></label>
+        <p class="small">自分の操作の音だけが鳴ります（ほかの人の作業では鳴りません）。この端末だけの設定です。</p>
+      </section>
+      <section>
         <div class="btn-row"><button class="btn" id="btnLeave">部屋を出る</button><button class="btn" id="btnFbOpen">感想を送る</button></div>
       </section>
     </div>
@@ -978,6 +984,53 @@ function applyRemoteBlocks(p){
   }
   if(items.length) showEditNotices({nick:p.nick, items});
 }
+// ---- 効果音: 音のファイルは使わず、Web Audio（ブラウザに入っている音を作る仕組み）でその場で合成する ----
+// 置く「コトッ」（木の積み木のような低めの音）、消す「ポフッ」（やわらかい息のような音）、塗る「シャッ」（軽い音）
+// 毎回ほんの少し高さを変えて、同じ音の繰り返しで耳が疲れないようにしている
+const sfx = (() => {
+  let ac = null, master = null, noiseBuf = null;
+  const prefs = (() => { try{ return JSON.parse(store.get("kousha-sfx")||"{}"); }catch(_){ return {}; } })();
+  let on = prefs.on !== false, vol = typeof prefs.vol==="number" ? prefs.vol : 50;
+  function ctx(){
+    if(!ac){ const AC = window.AudioContext || window.webkitAudioContext; if(!AC) return null;
+      ac = new AC(); master = ac.createGain(); master.connect(ac.destination);
+      noiseBuf = ac.createBuffer(1, ac.sampleRate*0.3, ac.sampleRate); const d = noiseBuf.getChannelData(0); for(let i=0;i<d.length;i++) d[i] = Math.random()*2-1; }
+    if(ac.state==="suspended") ac.resume().catch(()=>{});   // iPad などは、画面に触れたあとでないと音が出ないため
+    master.gain.value = (vol/100) * 1.2; return ac;
+  }
+  const jit = () => 1 + (Math.random()-0.5)*0.08;   // ±4% だけ高さをゆらす
+  function tone(t, f0, f1, dur, g){ const o=ac.createOscillator(), a=ac.createGain(); o.type="sine";
+    o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+    a.gain.setValueAtTime(0.0001,t); a.gain.exponentialRampToValueAtTime(g,t+0.004); a.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(a); a.connect(master); o.start(t); o.stop(t+dur+0.02); }
+  function noise(t, type, f0, f1, q, dur, g){ const n=ac.createBufferSource(), fl=ac.createBiquadFilter(), a=ac.createGain(); n.buffer=noiseBuf;
+    fl.type=type; fl.Q.value=q; fl.frequency.setValueAtTime(f0,t); fl.frequency.exponentialRampToValueAtTime(f1,t+dur);
+    a.gain.setValueAtTime(0.0001,t); a.gain.exponentialRampToValueAtTime(g,t+0.006); a.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    n.connect(fl); fl.connect(a); a.connect(master); n.start(t); n.stop(t+dur+0.02); }
+  const sounds = {
+    place(k){ const t=ac.currentTime, j=jit()*k; tone(t, 330*j, 150*j, 0.11, 0.55); noise(t, "bandpass", 2200*j, 1400*j, 1.2, 0.035, 0.18); },
+    erase(){ const t=ac.currentTime, j=jit(); noise(t, "lowpass", 3000*j, 350*j, 0.7, 0.14, 0.35); tone(t, 520*j, 300*j, 0.07, 0.10); },
+    paint(){ const t=ac.currentTime, j=jit(); noise(t, "highpass", 3500*j, 5000*j, 0.8, 0.07, 0.12); tone(t+0.01, 880*j, 990*j, 0.06, 0.07); },
+  };
+  return {
+    play(kind, k=1){ if(!on) return; try{ if(!ctx()) return; sounds[kind](k); }catch(_){} },
+    unlock(){ if(on) try{ ctx(); }catch(_){} },
+    get on(){ return on; }, get vol(){ return vol; },
+    set(o){ if("on" in o) on=o.on; if("vol" in o) vol=o.vol; store.set("kousha-sfx", JSON.stringify({on, vol})); if(ac) master.gain.value=(vol/100)*1.2; },
+  };
+})();
+// 変更の中身から鳴らす音を決める（範囲でまとめて置いたときも1回だけ鳴らす）
+function playEditSound(changes){
+  let placed=0, erased=0, painted=0, half=false;
+  for(const c of changes){ if(c.before===null||c.before===undefined){ placed++; if(c.after!==null && isHalf(c.after)) half=true; } else if(c.after===null) erased++; else painted++; }
+  if(placed && placed>=erased) sfx.play("place", half ? 1.3 : 1);   // ハーフは少し高い音
+  else if(erased) sfx.play("erase");
+  else if(painted) sfx.play("paint");
+}
+$("sfxOn").checked = sfx.on; $("sfxVol").value = sfx.vol;
+$("sfxOn").addEventListener("change", () => sfx.set({on:$("sfxOn").checked}));
+$("sfxVol").addEventListener("change", () => { sfx.set({vol:+$("sfxVol").value}); sfx.play("place"); });   // 大きさを変えたら試しに鳴らす
+
 const history = [];
 async function commit(changes){
   if(!changes.length) return false;
@@ -988,6 +1041,7 @@ async function commit(changes){
     lastEditAt = Date.now();
   }
   history.push(changes); if(history.length>60) history.shift();
+  playEditSound(changes);
   markDirty();
   if(await remoteApply(changes)){ sendBlocks(changes); logEdits(changes); return true; }
   return false;
@@ -1653,7 +1707,7 @@ let mcMouse = store.get("kousha-mcmouse")==="1", lastPtr = "mouse";
 $("mcMouse").checked = mcMouse;
 $("mcMouse").addEventListener("change", () => { mcMouse = $("mcMouse").checked; store.set("kousha-mcmouse", mcMouse ? "1" : "0"); setMode(mode); });
 function mcActive(){ return mcMouse && lastPtr==="mouse" && (mode==="place" || mode==="erase"); }
-canvas.addEventListener("pointerdown",e=>{ lastPtr=e.pointerType; if(isMenuOpen()){ closeMenu(); return; } canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+canvas.addEventListener("pointerdown",e=>{ lastPtr=e.pointerType; sfx.unlock(); if(isMenuOpen()){ closeMenu(); return; } canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pointers.size===1){ dragging=false; downPos={x:e.clientX,y:e.clientY}; downButton=e.button; }
   if(pointers.size===2){ const [a,b]=[...pointers.values()]; lastPinch=Math.hypot(a.x-b.x,a.y-b.y); lastMid={x:(a.x+b.x)/2,y:(a.y+b.y)/2}; dragging=true; } });
 canvas.addEventListener("pointermove",e=>{ lastPtr=e.pointerType;
