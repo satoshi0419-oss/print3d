@@ -326,6 +326,11 @@ section{display:flex;flex-direction:column;gap:8px}
         <label class="toggle" id="dummyRow"><input type="checkbox" id="showDummy"> ダミーの生徒を置く（確認用・自分の画面だけ）</label>
       </section>
       <section>
+        <div class="label">マウス</div>
+        <label class="toggle"><input type="checkbox" id="mcMouse"> マインクラフトと同じ操作にする（左クリックで消す・右クリックで置く）</label>
+        <p class="small">「置く」か「消す」を選んでいるときに使えます。この端末だけの設定です。</p>
+      </section>
+      <section>
         <div class="btn-row"><button class="btn" id="btnLeave">部屋を出る</button><button class="btn" id="btnFbOpen">感想を送る</button></div>
       </section>
     </div>
@@ -1583,10 +1588,10 @@ function placeSpot(hit){
   if(shape && e && hit.target[2]===e[2]+1 && hit.target[0]===e[0] && hit.target[1]===e[1]){ const ek=key(...e); if(voxels.has(ek) && isHalf(voxels.get(ek))) return {cell:e, merge:true}; }
   return {cell:hit.target, merge:false};
 }
-function act(cx,cy,forceErase){
+function act(cx,cy,forceErase,forceMode){
   if(exploded){ toast("「分解して見る」の間は編集できません"); return; }
   const hit=pick(cx,cy); if(!hit) return;
-  const m=forceErase?"erase":mode;
+  const m=forceMode||(forceErase?"erase":mode);
   if(m==="move"){ const c=hit.existing||hit.target; if(inBounds(c[0],c[1],0)) flyTo(c); return; }
   if(m==="range"){
     const c = inBounds(...hit.target) ? hit.target : hit.existing; if(!c || !inBounds(...c)) return;
@@ -1604,23 +1609,29 @@ function act(cx,cy,forceErase){
 }
 function updateGhost(cx,cy){
   const hit=pick(cx,cy);
-  const sp = hit && mode==="place" ? placeSpot(hit) : null;
-  const cell = hit ? (mode==="place"?sp.cell:mode==="range"?hit.target:mode==="move"?(hit.existing||hit.target):hit.existing) : null;
+  const md = mcActive() ? (hit && hit.existing ? "erase" : "place") : mode;   // マイクラ操作: ブロックをねらっているときはそのブロックに枠
+  const sp = hit && md==="place" ? placeSpot(hit) : null;
+  const cell = hit ? (md==="place"?sp.cell:md==="range"?hit.target:md==="move"?(hit.existing||hit.target):hit.existing) : null;
   if(!cell||!inBounds(...cell)){ ghost.visible=false; return; }
   lastHoverAt = Date.now(); $("coord").textContent = fmtCell(cell);
   // 置くときの枠: ハーフなら下半分、重ねて1つにするときは上半分
-  const hb = mode==="place" && shape ? (sp.merge ? 0.75 : 0.25) : 0.5;
+  const hb = md==="place" && shape ? (sp.merge ? 0.75 : 0.25) : 0.5;
   ghost.visible=true; ghost.scale.y = hb===0.5 ? 1 : 0.5; ghost.position.set(cell[0]-OFF+0.5,cell[2]+hb,cell[1]-OFF+0.5);
   // 届かない場所、置くと同じ高さに色が混ざる場所は赤い枠
   const kk=key(...cell), before=voxels.has(kk)?voxels.get(kk):null;
-  const mixes = (mode==="place" && before===null) || (mode==="paint" && before!==null) ? !!levelViolation([{k:kk, before, after:color}]) : false;   // 段の色だけを見るので形は関係ない
-  ghost.material.color.set(mode!=="move" && (!inReach(cell[0],cell[1]) || mixes) ? 0xd94f3a : 0x000000);
+  const mixes = (md==="place" && before===null) || (md==="paint" && before!==null) ? !!levelViolation([{k:kk, before, after:color}]) : false;   // 段の色だけを見るので形は関係ない
+  ghost.material.color.set(md!=="move" && (!inReach(cell[0],cell[1]) || mixes) ? 0xd94f3a : 0x000000);
 }
 canvas.addEventListener("contextmenu",e=>e.preventDefault());
-canvas.addEventListener("pointerdown",e=>{ if(isMenuOpen()){ closeMenu(); return; } canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+// マインクラフトと同じマウス操作（左＝消す・右＝置く）。端末ごとに覚えておく
+let mcMouse = store.get("kousha-mcmouse")==="1", lastPtr = "mouse";
+$("mcMouse").checked = mcMouse;
+$("mcMouse").addEventListener("change", () => { mcMouse = $("mcMouse").checked; store.set("kousha-mcmouse", mcMouse ? "1" : "0"); setMode(mode); });
+function mcActive(){ return mcMouse && lastPtr==="mouse" && (mode==="place" || mode==="erase"); }
+canvas.addEventListener("pointerdown",e=>{ lastPtr=e.pointerType; if(isMenuOpen()){ closeMenu(); return; } canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pointers.size===1){ dragging=false; downPos={x:e.clientX,y:e.clientY}; downButton=e.button; }
   if(pointers.size===2){ const [a,b]=[...pointers.values()]; lastPinch=Math.hypot(a.x-b.x,a.y-b.y); lastMid={x:(a.x+b.x)/2,y:(a.y+b.y)/2}; dragging=true; } });
-canvas.addEventListener("pointermove",e=>{
+canvas.addEventListener("pointermove",e=>{ lastPtr=e.pointerType;
   const prev=pointers.get(e.pointerId); if(!prev){ updateGhost(e.clientX,e.clientY); return; }
   pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pointers.size===2){ const [a,b]=[...pointers.values()]; const d=Math.hypot(a.x-b.x,a.y-b.y), mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2}; if(lastPinch) zoom(lastPinch/d); if(lastMid) pan(mid.x-lastMid.x,mid.y-lastMid.y); lastPinch=d; lastMid=mid; ghost.visible=false; return; }
@@ -1629,7 +1640,7 @@ canvas.addEventListener("pointermove",e=>{
   if(dragging){ ghost.visible=false; if(downButton===2) pan(dx,dy); else orbit(dx,dy); } else updateGhost(e.clientX,e.clientY);
 });
 function endPointer(e){ const wasSingle=pointers.size===1; pointers.delete(e.pointerId);
-  if(wasSingle&&!dragging&&downPos){ act(e.clientX,e.clientY,downButton===2);   /* Shift は「下がる」に使うので、Shift+クリックで消す機能はなし */ updateGhost(e.clientX,e.clientY); }
+  if(wasSingle&&!dragging&&downPos){ if(mcActive()) act(e.clientX,e.clientY,false,downButton===2?"place":"erase"); else act(e.clientX,e.clientY,downButton===2);   /* Shift は「下がる」に使うので、Shift+クリックで消す機能はなし */ updateGhost(e.clientX,e.clientY); }
   if(pointers.size<2){ lastPinch=0; lastMid=null; } if(pointers.size===0){ dragging=false; downPos=null; } }
 canvas.addEventListener("pointerup",endPointer); canvas.addEventListener("pointercancel",endPointer);
 canvas.addEventListener("pointerleave",()=>{ if(pointers.size===0) ghost.visible=false; });
@@ -1666,7 +1677,8 @@ function walk(){
 const modeBtns={place:"mPlace",erase:"mErase",paint:"mPaint",range:"mRange",move:"mMove"};
 function setMode(m){ mode=m; for(const [k,id] of Object.entries(modeBtns)) $(id).setAttribute("aria-pressed",String(k===m));
   const reach = reachApplies() ? "　白い円の中だけ届きます" : "";
-  $("hint").textContent = m==="place" ? "タップ（クリック）で置く　ドラッグで回す　2本指（ホイール）で拡大"+(matchMedia("(pointer: fine)").matches ? "　WASDで歩く　スペース／Shiftで上下" : "")+reach
+  if(mcMouse && (m==="place"||m==="erase") && matchMedia("(pointer: fine)").matches){ $("hint").textContent = "左クリックで消す　右クリックで置く　左ドラッグで回す　WASDで歩く　スペース／Shiftで上下"+reach; }
+  else $("hint").textContent = m==="place" ? "タップ（クリック）で置く　ドラッグで回す　2本指（ホイール）で拡大"+(matchMedia("(pointer: fine)").matches ? "　WASDで歩く　スペース／Shiftで上下" : "")+reach
     : m==="erase" ? "ブロックをタップで消す（パソコンは右クリックでも消せます）"+reach
     : m==="paint" ? "ブロックをタップで選んだ色に塗る"+reach
     : m==="range" ? "2か所タップして範囲を決めます（はじめ → おわり）"+reach
