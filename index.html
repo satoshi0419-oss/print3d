@@ -120,6 +120,9 @@ textarea{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radi
 .hintbtn{position:absolute;left:max(16px,env(safe-area-inset-left,0px));top:calc(88px + env(safe-area-inset-top,0px));width:26px;height:26px;border-radius:50%;border:0;padding:0;background:color-mix(in srgb,var(--panel) 88%,transparent);color:var(--fg);font:inherit;font-size:14px;font-weight:700;cursor:pointer;z-index:5}
 .hintbtn[aria-expanded="true"]{background:var(--accent);color:var(--accent-fg)}
 .hint{position:absolute;left:calc(max(16px,env(safe-area-inset-left,0px)) + 34px);top:calc(90px + env(safe-area-inset-top,0px));max-width:calc(100% - 244px);transition:opacity .35s;background:color-mix(in srgb,var(--panel) 88%,transparent);border-radius:8px;color:var(--fg)!important;padding:4px 10px;font-size:12px;pointer-events:none}
+.gllost{position:absolute;inset:0;z-index:40;display:grid;place-items:center;background:rgba(20,30,40,.75);color:#fff;text-align:center;padding:16px}
+.gllost[hidden]{display:none}
+.gllost div{max-width:340px}.gllost p{font-size:14px;margin:8px 0 16px}
 .toast{position:absolute;left:50%;bottom:calc(140px + env(safe-area-inset-bottom,0px));z-index:15;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%}
 .toast.show{opacity:.95}
 /* メニュー（引き出し）: ふだんは右の外に隠れていて、メニューボタンで出てくる */
@@ -293,6 +296,7 @@ section{display:flex;flex-direction:column;gap:8px}
     </div>
     <button class="hintbtn" id="hintBtn" aria-expanded="false" aria-controls="hint" title="操作のヒント">?</button><div class="hint hide" id="hint"></div>
     <div class="toast" id="toast"></div>
+    <div class="gllost" id="glLost" hidden><div><b>画面の表示が止まりました</b><p id="glLostMsg">自動で直しています…</p><button class="btn primary" id="glReload">読み込み直す</button></div></div>
     <div class="floatcard" id="rangeBox" hidden>
         <div class="label">範囲で埋める</div>
         <p class="small">作業台を2か所タップすると、その間が範囲になります。数字を直接変えることもできます。</p>
@@ -549,6 +553,14 @@ $("goHome").addEventListener("click", () => show("scrHome"));
 $("goHome2").addEventListener("click", () => show("scrHome"));
 $("btnSolo").addEventListener("click", () => enterSolo());
 $("btnJoin").addEventListener("click", joinAsStudent);
+$("glReload").addEventListener("click", reloadAndRejoin);
+function reloadAndRejoin(){
+  try{ if(S.room && !S.isTeacher) sessionStorage.setItem("kousha-rejoin", JSON.stringify({code:S.room.code, nick:S.nick, at:Date.now()})); }catch(_){}
+  location.reload();
+}
+// 1分以内の「読み込み直す」なら、同じ部屋に自動で入る（sessionStorage＝そのタブの間だけ残る保存場所）
+try{ const rj = JSON.parse(sessionStorage.getItem("kousha-rejoin")||"null"); sessionStorage.removeItem("kousha-rejoin");
+  if(rj && Date.now()-rj.at < 60000){ $("joinCode").value = rj.code; $("joinNick").value = rj.nick; setTimeout(joinAsStudent, 0); } }catch(_){}
 // 日本語入力の「変換の確定」の Enter では入室しない（isComposing = 変換中。keyCode 229 は古い Safari 向け）
 const isImeEnter = e => e.isComposing || e.keyCode === 229;
 $("joinNick").addEventListener("keydown", e => { if(e.key==="Enter" && !isImeEnter(e)) joinAsStudent(); });
@@ -1200,6 +1212,34 @@ function download(filename, data){
 // 3D表示（Three.js）: 世界座標 x=i, y=k(高さ), z=j
 // ============================================================
 const canvas=$("c");
+// ---- 安定して動かすためのしかけ ----
+// kick: 「いま動いている」の合図。1.5秒間は毎回描く
+var activeUntil=0; function kick(){ activeUntil = performance.now() + 1500; }
+// 不具合の自動記録: 感想と同じ表（feedback）に「[自動記録]」として送る。管理者の感想一覧で見られる。1回の読み込みで3件まで
+var autoReports=0;
+function reportProblem(what){
+  try{
+    console.warn("[kousha]", what);
+    if(typeof sb==="undefined" || !sb || autoReports>=3) return; autoReports++;
+    const role = S.room ? (S.isTeacher?"teacher":"student") : "solo";
+    sb.from("feedback").insert({ room_id: S.room?.id ?? null, school_id: null, role, nick: (S.nick||"").slice(0,30) || null,
+      category: "不具合", message: ("[自動記録] "+what).slice(0,1000), device: deviceSummary(),
+      context: { blocks: voxels.size, people: peers.size, realtime: S.rtStatus, screen: `${innerWidth}x${innerHeight}`, touch: navigator.maxTouchPoints||0,
+                 hidden: document.hidden, minutes: Math.round(performance.now()/60000) } }).then(()=>{}, ()=>{});
+  }catch(_){}
+}
+window.addEventListener("error", e => reportProblem("エラー: "+(e.message||"不明")+" @"+(e.lineno||"?")));
+window.addEventListener("unhandledrejection", e => reportProblem("エラー(非同期): "+(e.reason && e.reason.message || e.reason)));
+// 画面の描画（WebGL＝Web Graphics Library。ブラウザで3Dを描く仕組み）は、iPad のメモリが足りなくなったり、
+// 長くスリープしたりすると止められることがある（＝真っ暗）。そのときは自動で作り直しを待ち、だめなら読み込み直す
+var glLost=false, glTimer=null;
+canvas.addEventListener("webglcontextlost", e => {
+  e.preventDefault(); glLost=true; reportProblem("描画が止まった（WebGL context lost）");
+  $("glLost").hidden=false; clearTimeout(glTimer); glTimer=setTimeout(()=>{ $("glLostMsg").textContent="自動で直りませんでした。下のボタンで読み込み直してください（作品は消えません）"; }, 4000);
+}, false);
+canvas.addEventListener("webglcontextrestored", () => {
+  glLost=false; clearTimeout(glTimer); $("glLost").hidden=true; rebuildAll(); kick(); toast("画面をもとに戻しました");
+}, false);
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true}); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 const scene=new THREE.Scene(); const camera=new THREE.PerspectiveCamera(45,1,0.1,500);
 let OFF=N/2;
@@ -1493,7 +1533,7 @@ applyTheme(); matchMedia("(prefers-color-scheme: dark)").addEventListener("chang
 let floating=new Set(), overhang=new Set(), dirty=false;
 // 次の描画のタイミングで作り直す。画面が隠れていて描画が止まっているときも、0.4秒後には必ず作り直す
 function markDirty(){
-  if(dirty) return; dirty=true;
+  kick(); if(dirty) return; dirty=true;
   const run=()=>{ if(!dirty) return; dirty=false; rebuild(); };
   requestAnimationFrame(run); setTimeout(run, 400);
 }
@@ -1626,7 +1666,7 @@ function restoreSolo(){
 // ---- カメラ ----
 // target = カメラが見ている点（＝画面の中心＝白い点）。ふだんは地面（高さ 0）。スペース／Shift キーで上下できる
 const cam={target:new THREE.Vector3(0,0,0),theta:Math.PI/4,phi:1.08,dist:40};
-function updateCamera(){ const s=Math.sin(cam.phi); camera.position.set(cam.target.x+cam.dist*s*Math.sin(cam.theta), cam.target.y+cam.dist*Math.cos(cam.phi), cam.target.z+cam.dist*s*Math.cos(cam.theta)); camera.lookAt(cam.target); showZoom(); }
+function updateCamera(){ kick();  const s=Math.sin(cam.phi); camera.position.set(cam.target.x+cam.dist*s*Math.sin(cam.theta), cam.target.y+cam.dist*Math.cos(cam.phi), cam.target.z+cam.dist*s*Math.cos(cam.theta)); camera.lookAt(cam.target); showZoom(); }
 // ズーム倍率 = 地面に立った距離 ÷ 今の距離。地面の目線が1倍、引いて見るほど小さくなる（全体を見ると 0.06倍 など）
 // ボタンを押すと、1倍のときは「全体を見る」、それ以外は「1倍（地面の目線）」に切りかわる
 var shownZoom="";   /* var: 起動直後、この行より先に updateCamera が呼ばれても動くように */
@@ -1712,10 +1752,10 @@ let mcMouse = store.get("kousha-mcmouse")==="1", lastPtr = "mouse";
 $("mcMouse").checked = mcMouse;
 $("mcMouse").addEventListener("change", () => { mcMouse = $("mcMouse").checked; store.set("kousha-mcmouse", mcMouse ? "1" : "0"); setMode(mode); });
 function mcActive(){ return mcMouse && lastPtr==="mouse" && (mode==="place" || mode==="erase"); }
-canvas.addEventListener("pointerdown",e=>{ lastPtr=e.pointerType; sfx.unlock(); hideHint(); if(isMenuOpen()){ closeMenu(); return; } canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+canvas.addEventListener("pointerdown",e=>{ kick(); lastPtr=e.pointerType; sfx.unlock(); hideHint(); if(isMenuOpen()){ closeMenu(); return; } canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pointers.size===1){ dragging=false; downPos={x:e.clientX,y:e.clientY}; downButton=e.button; }
   if(pointers.size===2){ const [a,b]=[...pointers.values()]; lastPinch=Math.hypot(a.x-b.x,a.y-b.y); lastMid={x:(a.x+b.x)/2,y:(a.y+b.y)/2}; dragging=true; } });
-canvas.addEventListener("pointermove",e=>{ lastPtr=e.pointerType;
+canvas.addEventListener("pointermove",e=>{ kick(); lastPtr=e.pointerType;
   const prev=pointers.get(e.pointerId); if(!prev){ updateGhost(e.clientX,e.clientY); return; }
   pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pointers.size===2){ const [a,b]=[...pointers.values()]; const d=Math.hypot(a.x-b.x,a.y-b.y), mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2}; if(lastPinch) zoom(lastPinch/d); if(lastMid) pan(mid.x-lastMid.x,mid.y-lastMid.y); lastPinch=d; lastMid=mid; ghost.visible=false; return; }
@@ -1741,7 +1781,7 @@ function typingNow(e){ return ["INPUT","SELECT","TEXTAREA"].includes(e.target.ta
 document.addEventListener("keydown", e => {
   if(!WALK_KEYS[e.code] || typingNow(e) || e.ctrlKey || e.metaKey || e.altKey) return;
   if(e.code==="Space") e.preventDefault();   // スペースで、選んでいたボタンが押されたり画面がスクロールしたりしないように
-  heldKeys.add(e.code); hideHint();
+  heldKeys.add(e.code); hideHint(); kick();
 });
 document.addEventListener("keyup", e => { heldKeys.delete(e.code); if(e.code==="Space" && !typingNow(e)) e.preventDefault(); });
 window.addEventListener("blur", () => heldKeys.clear());   // 別の画面に切りかえたら止まる（押しっぱなしのまま動き続けないように）
@@ -1995,7 +2035,16 @@ $("btnSample").addEventListener("click",()=>bulkReplace(buildSample()));
 function resize(){ const r=canvas.parentElement.getBoundingClientRect(); if(!r.width) return; renderer.setSize(r.width,r.height,false); camera.aspect=r.width/r.height; camera.updateProjectionMatrix(); }
 new ResizeObserver(resize).observe(canvas.parentElement);
 updateCamera(); buildLabels(); worldReady = true;
-(function loop(){ if(!$("scrEditor").hidden){ walk(); renderer.render(scene,camera); updateAvatars(); } requestAnimationFrame(loop); })();
+// 描画のループ。先に「次の回」を予約してから描くので、途中でエラーが起きても画面が固まらない。
+// 操作していないときは1秒に4回だけ描く（iPad の発熱・電池の減り・描画の失敗を減らすため）。動かしている間は毎回描く
+let lastFrame=0, loopErr=0;
+(function loop(now){ requestAnimationFrame(loop);
+  if($("scrEditor").hidden || glLost) return;
+  if(!(now < activeUntil || heldKeys.size || now-lastFrame > 250)) return;
+  lastFrame = now;
+  try{ walk(); renderer.render(scene,camera); updateAvatars(); }
+  catch(e){ if(loopErr++ < 1) reportProblem("描画中のエラー: "+(e && e.message || e)); }
+})(0);
 if(location.hash==="#teacher"){ show("scrTeacher"); refreshAuth(); }
 })();
 </script>
