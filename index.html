@@ -105,7 +105,8 @@ textarea{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radi
 .zoomchip{position:absolute;right:max(12px,env(safe-area-inset-right,0px));top:calc(64px + env(safe-area-inset-top,0px));z-index:5;display:flex;align-items:center;gap:5px;padding:6px 11px;border:0;border-radius:999px;background:color-mix(in srgb,var(--panel) 90%,transparent);color:var(--fg);font:inherit;font-size:13px;font-variant-numeric:tabular-nums;box-shadow:0 2px 6px rgba(0,0,0,.2);cursor:pointer}
 .zoomchip svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 .zoomchip .reset{font-size:12px;opacity:.85}
-#btnShape span{white-space:nowrap;font-size:10px;letter-spacing:-.02em}
+#btnShape span,#btnRotate span{white-space:nowrap;font-size:10px;letter-spacing:-.02em}
+#btnRotate[aria-pressed="true"] svg{transform:scaleX(-1)}
 .zoomchip.withmini{top:calc(64px + 160px + 8px + env(safe-area-inset-top,0px))}
 @media (max-width:760px){.zoomchip.withmini{top:calc(64px + 112px + 8px + env(safe-area-inset-top,0px))}}
 .notice{position:absolute;transform:translate(-50%,-50%);background:var(--panel);color:var(--fg);border:1.5px solid var(--accent);border-radius:999px;padding:2px 10px;font-size:12px;font-weight:700;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.25);animation:noticeIn .25s ease-out}
@@ -315,7 +316,7 @@ section{display:flex;flex-direction:column;gap:8px}
       <span class="hb-sep" aria-hidden="true"></span>
       <div class="swatches" id="swatches" role="group" aria-label="ブロックの色"></div>
       <span class="hb-sep" aria-hidden="true"></span>
-      <button class="tool" id="btnShape" aria-pressed="false" title="形を切りかえ（Qキー）：ブロック ⇔ 下ハーフ"><svg viewBox="0 0 24 24"><g class="full"><rect x="4" y="4" width="16" height="16" rx="2"/></g><g class="half" style="display:none"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="2.5 2.5" opacity=".5"/><rect x="4" y="12" width="16" height="8" rx="1.5" fill="currentColor"/></g></svg><span>ブロック</span></button>
+      <button class="tool" id="btnShape" aria-pressed="false" title="形を切りかえ（Qキー）：ブロック → 下ハーフ → 縦ハーフ"><svg viewBox="0 0 24 24"><g class="k0"><rect x="4" y="4" width="16" height="16" rx="2"/></g><g class="k1" style="display:none"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="2.5 2.5" opacity=".5"/><rect x="4" y="12" width="16" height="8" rx="1.5" fill="currentColor"/></g><g class="k2" style="display:none"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="2.5 2.5" opacity=".5"/><rect x="8" y="4" width="8" height="16" rx="1.5" fill="currentColor"/></g><g class="k3" style="display:none"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="2.5 2.5" opacity=".5"/><rect x="10" y="4" width="4" height="16" rx="1" fill="currentColor"/></g></svg><span>ブロック</span></button><button class="tool" id="btnRotate" hidden title="縦の形の向きを90°回す（Rキー）"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg><span>向き</span></button>
       <button class="tool" id="btnUndo" title="1つ戻す（Ctrl+Z）"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-4"/></svg><span>戻す</span></button>
     </div>
     <button class="menubtn" id="btnMenu" aria-expanded="false" aria-controls="panel"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>メニュー</button>
@@ -408,6 +409,7 @@ section{display:flex;flex-direction:column;gap:8px}
         </dl>
         <div class="flag" id="overFlag"><b id="overCount">0</b><span></span></div>
         <div class="flag" id="swapFlag"><b id="swapCount">0</b><span></span></div>
+        <div class="flag" id="thinFlag" hidden><b id="thinCount">0</b><span></span></div>
         <p class="small" id="swapNote"></p>
         <label class="toggle"><input type="checkbox" id="showFloat" checked> 浮き（赤）と支えなし（橙）を色で表示</label>
       </section>
@@ -455,6 +457,7 @@ const key = (i,j,k) => `${i},${j},${k}`;
 const parse = s => s.split(",").map(Number);
 const inBounds = (i,j,k) => i>=0 && j>=0 && k>=0 && i<N && j<N && k<H;
 const fmt = x => x.toLocaleString("ja-JP",{maximumFractionDigits:1});
+const fmt2 = x => x.toLocaleString("ja-JP",{maximumFractionDigits:2});
 const store = { get(k){ try{return localStorage.getItem(k);}catch(_){return null;} }, set(k,v){ try{localStorage.setItem(k,v);}catch(_){} } };
 // 端末ID: この端末（ブラウザ）の目印。ページを開き直しても同じ。
 // 同じ端末から同じニックネームで入り直したときに「自分の残り」と見分けるために使う
@@ -491,9 +494,85 @@ const dirtyChunks = new Set();  // 作り直しが必要な区画
 let worldReady = false;
 function markAround(i,j){ for(let di=-1;di<=1;di++) for(let dj=-1;dj<=1;dj++) dirtyChunks.add(ckOf(i+di,j+dj)); }
 // 高さ（Y）ごとに、どの色が何個あるか。「同じ高さには1色だけ」の判定に使う
-// ブロックの値 = 色(0〜7) + ハーフなら8。 例: 2 = 色2のブロック、10 = 色2の下ハーフ
-const HALF = 8, isHalf = v => (v & HALF) !== 0;
-const fullAt = (src, k) => src.has(k) && !isHalf(src.get(k));   // そのマスが「全部ブロック」か（ハーフは上半分が空）
+// ============================================================
+// ブロックの形
+//  ブロックの値 = 色(0〜7) + 形×8。 例: 2 = 色2のブロック、10 = 色2の下ハーフ、18 = 色2の縦ハーフ（東西にのびる）
+//  形: 0 ブロック / 1 下ハーフ / 2,3 縦ハーフ / 4,5 縦1/4
+//      縦の形の 2・4 は東西（X）にのびる壁、3・5 は南北（Z）にのびる壁
+//  縦の形は「薄い壁（パネル）」。マスの真ん中に立ち、となりの薄い壁と自動でつながる
+//  （マインクラフトのガラス板と同じ考え方。L字の角・T字・十字も自動でできる）
+//  形は「箱」の集まりで表す。箱 = [x0,x1, z0,z1, y0,y1]（マスの中を 1/8 きざみで測った範囲）
+// ============================================================
+const NSHAPES = 6, U = 8;
+const shapeOf = v => v >> 3, colorOf = v => v & 7, makeVal = (c, s) => (c & 7) | (s << 3);
+const isHalf = v => shapeOf(v) === 1;
+const isPane = v => shapeOf(v) >= 2;
+const paneAxis = v => (shapeOf(v) - 2) & 1;    // 0 = 東西（X）にのびる、1 = 南北（Z）にのびる
+const paneThin = v => shapeOf(v) >= 4;         // 1/4 の厚さ
+const SHAPE_NAMES = ["ブロック","下ハーフ","縦ハーフ","縦ハーフ","縦1/4","縦1/4"];
+const FULL_BOX = [0,U,0,U,0,U], SLAB_BOX = [0,U,0,U,0,U/2];
+const DIR4 = [[-1,0],[1,0],[0,-1],[0,1]];      // 西・東・北・南（i, j の向き）
+// 薄い壁が、方向 d のとなりとつながるか。
+//  ・となりも薄い壁: どちらかが「その方向にのびる壁」ならつながる（平行に並んだ2枚の壁は、はしごのようにつながらない）
+//  ・となりがふつうのブロックなど: 自分がその方向にのびる壁ならつながる
+function paneConn(has, get, i, j, h, v, d){
+  const nk = key(i+DIR4[d][0], j+DIR4[d][1], h); if(!has(nk)) return false;
+  const nv = get(nk), ax = d < 2 ? 0 : 1;
+  return isPane(nv) ? (paneAxis(v)===ax || paneAxis(nv)===ax) : paneAxis(v)===ax;
+}
+// 薄い壁の「うで」（真ん中から4方向へのびる部分）。つながりが0か1つなら、まっすぐ端まで通す
+function paneArms(has, get, i, j, h, v){
+  const c = [0,1,2,3].map(d => paneConn(has, get, i, j, h, v, d)), n = c.filter(Boolean).length;
+  if(n===0) return paneAxis(v)===0 ? [1,1,0,0] : [0,0,1,1];
+  if(n===1) return c[0]||c[1] ? [1,1,0,0] : [0,0,1,1];
+  return c.map(Number);
+}
+function computeBoxes(has, get, k){
+  if(!has(k)) return [];
+  const v = get(k), s = shapeOf(v);
+  if(s===0) return [FULL_BOX]; if(s===1) return [SLAB_BOX];
+  const [i,j,h] = parse(k), a = paneArms(has, get, i, j, h, v), t = paneThin(v) ? U/4 : U/2, c0 = (U-t)/2, c1 = c0+t, out = [];
+  if(a[0]&&a[1]){ out.push([0,U,c0,c1,0,U]); if(a[2]) out.push([c0,c1,0,c0,0,U]); if(a[3]) out.push([c0,c1,c1,U,0,U]); }
+  else if(a[2]&&a[3]){ out.push([c0,c1,0,U,0,U]); if(a[0]) out.push([0,c0,c0,c1,0,U]); if(a[1]) out.push([c1,U,c0,c1,0,U]); }
+  else { out.push([c0,c1,c0,c1,0,U]); if(a[0]) out.push([0,c0,c0,c1,0,U]); if(a[1]) out.push([c1,U,c0,c1,0,U]); if(a[2]) out.push([c0,c1,0,c0,0,U]); if(a[3]) out.push([c0,c1,c1,U,0,U]); }
+  return out;
+}
+// 形を調べる道具。同じ計算を何度もしないよう、1回の作業の間だけ結果を覚えておく
+function shapeCtx(has, get){
+  const memo = new Map();
+  return { has, get, boxes(k){ let b = memo.get(k); if(!b){ b = computeBoxes(has, get, k); memo.set(k, b); } return b; } };
+}
+const mapCtx = m => shapeCtx(k => m.has(k), k => m.get(k));
+// 軸 a（0=X, 1=Z, 2=高さ）に向いた面どうしが、残りの2つの軸で「Q が P を覆う」「重なる」か
+const AX2 = [[1,2],[0,2],[0,1]];
+function covers(Q, P, a){ const [b,c] = AX2[a]; return Q[2*b]<=P[2*b] && Q[2*b+1]>=P[2*b+1] && Q[2*c]<=P[2*c] && Q[2*c+1]>=P[2*c+1]; }
+function overlaps(Q, P, a){ const [b,c] = AX2[a]; return Math.min(Q[2*b+1],P[2*b+1]) > Math.max(Q[2*b],P[2*b]) && Math.min(Q[2*c+1],P[2*c+1]) > Math.max(Q[2*c],P[2*c]); }
+const stepKey = (k, a, s) => { const p = parse(k); p[a] += s; return key(...p); };
+// マス k と、その s 向き（軸 a）のとなりのマスが、面でくっついているか（少しでも重なればくっついている）
+function cellsTouch(ctx, k, a, s){
+  const nk = stepKey(k, a, s); if(!ctx.has(nk)) return false;
+  const Pb = ctx.boxes(k), Qb = ctx.boxes(nk);
+  for(const P of Pb){ if(s>0 ? P[2*a+1]!==U : P[2*a]!==0) continue;
+    for(const Q of Qb) if((s>0 ? Q[2*a]===0 : Q[2*a+1]===U) && overlaps(Q, P, a)) return true; }
+  return false;
+}
+// 真下のブロックに支えられているか（地面の上も「支えあり」）
+const supported = (ctx, k) => parse(k)[2]===0 || cellsTouch(ctx, k, 2, -1);
+// 箱 P の面（軸 a・向き s）が、ほかの箱で完全にふさがれていて見えないか
+function faceHidden(ctx, k, h, P, own, a, s){
+  const p = s>0 ? P[2*a+1] : P[2*a];
+  if(p===0 || p===U){
+    if((s>0) !== (p===U)) return false;
+    if(a===2 && s<0 && h===0) return true;   // 地面に接している底面
+    const nk = stepKey(k, a, s); if(!ctx.has(nk)) return false;
+    for(const Q of ctx.boxes(nk)) if((s>0 ? Q[2*a]===0 : Q[2*a+1]===U) && covers(Q, P, a)) return true;
+    return false;
+  }
+  for(const Q of own) if(Q!==P && (s>0 ? Q[2*a]===p : Q[2*a+1]===p) && covers(Q, P, a)) return true;   // 同じマスの中の箱どうし
+  return false;
+}
+const boxVolume = bs => bs.reduce((t,B) => t + (B[1]-B[0])*(B[3]-B[2])*(B[5]-B[4]), 0) / (U*U*U);
+function mapVolume(m){ const ctx=mapCtx(m); let t=0; for(const k of m.keys()) t+=boxVolume(ctx.boxes(k)); return t; }   // ブロック何個分か
 const levelCounts = new Map();   // 高さ → Map(色 → 個数)
 function levelAdd(h, c, n){
   c &= 7;   // 段の色の数え方は、形に関係なく色だけ
@@ -857,7 +936,7 @@ async function loadAllBlocks(){
   const {data, error} = await sb.rpc("room_blocks", {p_room:S.room.id});
   if(error){ toast("読み込みエラー: "+error.message); return; }
   const m = new Map();
-  for(const [x,y,z,c,a,sh] of data){ const k=key(x,y,z); m.set(k, c | (sh ? HALF : 0)); if(a) authors.set(k,a); }
+  for(const [x,y,z,c,a,sh] of data){ const k=key(x,y,z); m.set(k, makeVal(c, sh>0 && sh<NSHAPES ? sh : 0)); if(a) authors.set(k,a); }
   for(const [k,c] of voxels) m.set(k,c);   // 読み込み中にリアルタイムで届いた変更を上書きで残す
   replaceWorld(m);
 }
@@ -949,7 +1028,7 @@ function flushCursor(){
 async function remoteApply(changes){ // changes: [{k, before, after}]
   if(!S.room) return true;
   const put = [], del = [];
-  for(const c of changes){ const [x,y,z] = parse(c.k); if(c.after===null) del.push([x,y,z]); else put.push([x,y,z,c.after & 7,S.nick,isHalf(c.after)?1:0]); }
+  for(const c of changes){ const [x,y,z] = parse(c.k); if(c.after===null) del.push([x,y,z]); else put.push([x,y,z,colorOf(c.after),S.nick,shapeOf(c.after)]); }
   // 置く・塗る・消すを1回の取引（トランザクション）で書き込む。途中で失敗したら全部取り消される
   const r = await sb.rpc("apply_blocks", {p_room:S.room.id, p_put:put, p_del:del});
   const error = r.error || (del.length && r.data===0 && S.settings.locked && !S.isTeacher ? {message:"policy"} : null);
@@ -1039,8 +1118,8 @@ const sfx = (() => {
 // 変更の中身から鳴らす音を決める（範囲でまとめて置いたときも1回だけ鳴らす）
 function playEditSound(changes){
   let placed=0, erased=0, painted=0, half=false;
-  for(const c of changes){ if(c.before===null||c.before===undefined){ placed++; if(c.after!==null && isHalf(c.after)) half=true; } else if(c.after===null) erased++; else painted++; }
-  if(placed && placed>=erased) sfx.play("place", half ? 1.3 : 1);   // ハーフは少し高い音
+  for(const c of changes){ if(c.before===null||c.before===undefined){ placed++; if(c.after!==null && shapeOf(c.after)) half=true; } else if(c.after===null) erased++; else painted++; }
+  if(placed && placed>=erased) sfx.play("place", half ? 1.3 : 1);   // ハーフや薄い壁は少し高い音
   else if(erased) sfx.play("erase");
   else if(painted) sfx.play("paint");
 }
@@ -1082,7 +1161,7 @@ async function bulkReplace(newMap){
   const {error} = await sb.rpc("clear_room", {p_room:S.room.id});
   if(error){ toast("消せませんでした: "+error.message); return; }
   replaceWorld(); authors = new Map(); history.length=0;
-  const put = [...newMap].map(([k,c]) => { const [x,y,z]=parse(k); return [x,y,z,c & 7,S.nick||"先生",isHalf(c)?1:0]; });
+  const put = [...newMap].map(([k,c]) => { const [x,y,z]=parse(k); return [x,y,z,colorOf(c),S.nick||"先生",shapeOf(c)]; });
   const r = await sb.rpc("apply_blocks", {p_room:S.room.id, p_put:put, p_del:[]});
   if(r.error){ toast("送信エラー: "+r.error.message); return; }
   for(const [k,c] of newMap){ voxels.set(k,c); authors.set(k,S.nick||"先生"); }
@@ -1145,20 +1224,16 @@ const FACES = [
   {n:[0,0, 1], v:[[0,0,1],[1,0,1],[1,1,1],[0,1,1]]},
   {n:[0,0,-1], v:[[0,0,0],[0,1,0],[1,1,0],[1,0,0]]},
 ];
-function exposedFaces(src){
-  const out=[];
-  for(const [k,c] of src){ const [i,j,h]=parse(k); for(const f of FACES){ if(src.has(key(i+f.n[0],j+f.n[1],h+f.n[2]))) continue; out.push({i,j,h,c,f}); } }
-  return out;
-}
-// 2つのマスがくっついているか。ハーフは上半分が空なので、上下のつながりは「全部ブロック」を通るときだけ
-function touches(src, k, nk, dz){ return dz===1 ? !isHalf(src.get(k)) : dz===-1 ? !isHalf(src.get(nk)) : true; }
+// 2つのマスがくっついているか（形を考えて、面どうしが重なっているときだけ）。
+// 例: ハーフの上は半分空いているので、上のブロックとはくっつかない。薄い壁は、のびている向きの端と、上下でくっつく
+const faceAxis = f => f.n[0] ? 0 : f.n[1] ? 1 : 2;
 function findFloating(src){
-  const seen=new Set(), stack=[];
+  const ctx=mapCtx(src), seen=new Set(), stack=[];
   for(const k of src.keys()) if(parse(k)[2]===0){ seen.add(k); stack.push(k); }
-  while(stack.length){ const k0=stack.pop(), [i,j,h]=parse(k0); for(const f of FACES){ const nk=key(i+f.n[0],j+f.n[1],h+f.n[2]); if(src.has(nk)&&!seen.has(nk)&&touches(src,k0,nk,f.n[2])){ seen.add(nk); stack.push(nk); } } }
+  while(stack.length){ const k0=stack.pop(), [i,j,h]=parse(k0); for(const f of FACES){ const nk=key(i+f.n[0],j+f.n[1],h+f.n[2]), a=faceAxis(f); if(src.has(nk)&&!seen.has(nk)&&cellsTouch(ctx,k0,a,f.n[a])){ seen.add(nk); stack.push(nk); } } }
   const out=new Set(); for(const k of src.keys()) if(!seen.has(k)) out.add(k); return out;
 }
-function findOverhang(src){ const out=new Set(); for(const k of src.keys()){ const [i,j,h]=parse(k); if(h>0 && !fullAt(src,key(i,j,h-1))) out.add(k); } return out; }
+function findOverhang(src){ const ctx=mapCtx(src), out=new Set(); for(const k of src.keys()) if(!supported(ctx,k)) out.add(k); return out; }
 // 中を詰める: 各マスで、一番上のブロックから地面までを埋める。
 // 埋める色は「その高さでいちばん多い色」（＝段の色）。上の色で下まで埋めると、段の中に色が混ざって色の交換が増えるため
 function filledVoxels(src){
@@ -1172,18 +1247,47 @@ function filledVoxels(src){
   for(const [ij,{h,c}] of top){ const [i,j]=ij.split(",").map(Number); for(let z=0;z<h;z++){ const kk=key(i,j,z); if(!v.has(kk)) v.set(kk, levelColor.has(z)?levelColor.get(z):c); } }
   // 上に何かが載っているハーフは、すき間を詰めて「全部ブロック」にする（いちばん上のハーフはそのまま）
   for(const [k,c] of v) if(isHalf(c)){ const [i,j,h]=parse(k); if(v.has(key(i,j,h+1))) v.set(k, c & 7); }
+  // 薄い壁の横（壁がのびていない側）に、詰めたブロックなどがあるときは「全部ブロック」にする。
+  // そのままだと、壁とブロックの間に細いすき間（中に閉じこめられた空洞）ができてしまうため
+  for(let pass=0; pass<3; pass++){
+    const ctx=mapCtx(v), turn=[];
+    for(const [k,c] of v) if(isPane(c)){ const [i,j,h]=parse(k), arms=paneArms(ctx.has,ctx.get,i,j,h,c);
+      for(let d=0; d<4; d++){ if(arms[d]) continue; const nk=key(i+DIR4[d][0], j+DIR4[d][1], h); if(v.has(nk) && !isPane(v.get(nk))){ turn.push(k); break; } } }
+    if(!turn.length) break;
+    for(const k of turn) v.set(k, v.get(k) & 7);
+  }
   return v;
 }
-// 高さ方向だけ半分の細かさのマス目に直す。全部ブロック → 2マス、ハーフ → 下の1マス
-function toHalfGrid(src){ const g=new Map(); for(const [k,c] of src){ const [i,j,h]=parse(k); g.set(key(i,j,2*h),c); if(!isHalf(c)) g.set(key(i,j,2*h+1),c); } return g; }
-function buildSTL(src, mm){
-  const faces=exposedFaces(toHalfGrid(src)), triCount=faces.length*2;
-  const buf=new ArrayBuffer(84+triCount*50), dv=new DataView(buf);
+// STL（3Dプリンター用の形のファイル）を作る。
+// 形の細かい区切り（ハーフの高さ、薄い壁の厚さ）がある列・行・段だけ、マス目をさらに細かく分けた
+// 「不ぞろいなマス目」を作り、その上で外に見えている面だけを書き出す。
+// こうすると、どこでも面の角どうしがぴったり合う → すき間のない（閉じた）形になり、スライサーで修正が出ない
+//  src: 書き出すブロック / ctxSrc: 形（薄い壁のつながり）を決めるときに見る全体（色ごとに分けて書き出すとき用）
+function buildSTL(src, mm, ctxSrc){
+  const ctx=mapCtx(ctxSrc||src), cut=[new Set(),new Set(),new Set()], items=[];
+  for(const k of src.keys()){ const p=parse(k), bs=ctx.boxes(k); items.push([p,bs]);
+    for(const B of bs) for(let a=0;a<3;a++){ cut[a].add(p[a]*U+B[2*a]); cut[a].add(p[a]*U+B[2*a+1]); } }
+  const coords=cut.map(s=>[...s].sort((x,y)=>x-y)), idx=coords.map(c=>new Map(c.map((g,n)=>[g,n])));
+  // 細かいマス目の番号を1つの数にまとめる（文字より速い）
+  const K=(x,y,z)=>(x*1024+y)*1024+z, cells=new Set(), list=[];
+  for(const [p,bs] of items) for(const B of bs){
+    const r=[0,1,2].map(a=>[idx[a].get(p[a]*U+B[2*a]), idx[a].get(p[a]*U+B[2*a+1])]);
+    for(let x=r[0][0];x<r[0][1];x++) for(let y=r[1][0];y<r[1][1];y++) for(let z=r[2][0];z<r[2][1];z++){ const kk=K(x,y,z); if(!cells.has(kk)){ cells.add(kk); list.push([x,y,z]); } }
+  }
+  const faces=[];
+  for(const [x,y,z] of list) for(const f of FACES){ if(!cells.has(K(x+f.n[0],y+f.n[1],z+f.n[2]))) faces.push([x,y,z,f]); }
+  const triCount=faces.length*2, buf=new ArrayBuffer(84+triCount*50), dv=new DataView(buf);
   const header="Kousha Block Studio - mm, z-up"; for(let i=0;i<header.length;i++) dv.setUint8(i,header.charCodeAt(i));
-  dv.setUint32(80,triCount,true); let o=84;
-  const tri=(n,a,b,c)=>{ dv.setFloat32(o,n[0],true);dv.setFloat32(o+4,n[1],true);dv.setFloat32(o+8,n[2],true);o+=12; for(const p of [a,b,c]){dv.setFloat32(o,p[0]*mm,true);dv.setFloat32(o+4,p[1]*mm,true);dv.setFloat32(o+8,p[2]*mm/2,true);o+=12;} dv.setUint16(o,0,true);o+=2; };
-  for(const {i,j,h,f} of faces){ const V=f.v.map(p=>[p[0]+i,p[1]+j,p[2]+h]); tri(f.n,V[0],V[1],V[2]); tri(f.n,V[0],V[2],V[3]); }
+  dv.setUint32(80,triCount,true); let o=84; const s=mm/U;
+  const tri=(n,a,b,c)=>{ dv.setFloat32(o,n[0],true);dv.setFloat32(o+4,n[1],true);dv.setFloat32(o+8,n[2],true);o+=12; for(const p of [a,b,c]){dv.setFloat32(o,p[0]*s,true);dv.setFloat32(o+4,p[1]*s,true);dv.setFloat32(o+8,p[2]*s,true);o+=12;} dv.setUint16(o,0,true);o+=2; };
+  for(const [x,y,z,f] of faces){ const V=f.v.map(q=>[coords[0][x+q[0]], coords[1][y+q[1]], coords[2][z+q[2]]]); tri(f.n,V[0],V[1],V[2]); tri(f.n,V[0],V[2],V[3]); }
   return buf;
+}
+// 薄い壁がプリンターで作れる厚さか。ノズル0.4mmで、壁は2本分（0.8mm）以上あると安心
+const MIN_WALL_MM = 0.8;
+function thinWalls(src, mm){
+  let q=0, hf=0; for(const c of src.values()){ if(!isPane(c)) continue; if(paneThin(c)) q++; else hf++; }
+  return {quarter:q, half:hf, qmm:mm/4, hmm:mm/2, bad:(q && mm/4<MIN_WALL_MM) || (hf && mm/2<MIN_WALL_MM)};
 }
 function crc32(bytes){ let c,crc=0xFFFFFFFF; for(let n=0;n<bytes.length;n++){ c=(crc^bytes[n])&0xFF; for(let k=0;k<8;k++) c=c&1?(c>>>1)^0xEDB88320:c>>>1; crc=(crc>>>8)^c; } return (crc^0xFFFFFFFF)>>>0; }
 function makeZip(entries){
@@ -1405,7 +1509,15 @@ function updateRangePreview(){
   if($("onlyRange").checked && !$("tabExport").hidden) refreshParts();
 }
 function rangeFillChanges(){
-  const out=[]; for(const [i,j,h] of rangeFillCells()){ const k=key(i,j,h), b=voxels.has(k)?voxels.get(k):null, a=color|(shape?HALF:0); if(b!==a) out.push({k,before:b,after:a}); } return out;
+  const out=[]; for(const [i,j,h] of rangeFillCells()){ const k=key(i,j,h), b=voxels.has(k)?voxels.get(k):null, a=makeVal(color, kindShape(kind, rangePaneAxis(i,j))); if(b!==a) out.push({k,before:b,after:a}); } return out;
+}
+// 範囲を薄い壁で埋めるときの向き: 細長い範囲は長い向き、四角い範囲は「周りを囲む向き」（北と南の辺は東西に、東と西の辺は南北に）
+// 角は、となりの壁と自動でつながって L字になる
+function rangePaneAxis(i,j){
+  const r=rangeBounds(); if(!r) return 0; const {lo,hi}=r, w=hi[0]-lo[0], d=hi[1]-lo[1];
+  if(w===0) return 1; if(d===0) return 0;
+  if(j===lo[1]||j===hi[1]) return 0; if(i===lo[0]||i===hi[0]) return 1;
+  const ax = w>=d ? 0 : 1; return paneFlip ? 1-ax : ax;   // 中のマス（「中まで全部」のとき）だけ「向き」ボタンで回せる
 }
 async function rangeApply(fill){
   updateRangePreview(); if($(fill?"btnRangeFill":"btnRangeClear").disabled) return;
@@ -1554,21 +1666,15 @@ function rebuild(){
 //  keys: 形にするブロックのキー / has, get: ブロックの有無と色を調べる関数 / colorOf: 面の色を決める関数
 function buildGeometry(keys, has, get, colorOf){
   const solid=(i,j,k)=> k<0 || has(key(i,j,k));   // 地面(k<0)も「詰まっている」扱い → 接地部分に影
-  const faces=[];
+  const ctx=shapeCtx(has,get), faces=[];
   for(const kk of keys){
-    const [i,j,h]=parse(kk), c=get(kk), top=isHalf(c)?0.5:1;   // top: このブロックの上の面の高さ（ハーフは0.5）
-    for(const f of FACES){
-      const nk=key(i+f.n[0], j+f.n[1], h+f.n[2]); let z0=0;
-      if(f.n[2]===-1){ if(h===0) continue; if(has(nk) && !isHalf(get(nk))) continue; }   // 底面: 地面か、下が全部ブロックなら見えない
-      else if(f.n[2]===1){ if(top===1 && has(nk)) continue; }                            // 上面: ハーフの上面は、上に何があってもすき間から見える
-      else if(has(nk)){ const nt=isHalf(get(nk))?0.5:1; if(nt>=top) continue; z0=nt; }  // 横の面: となりがハーフなら、上の半分だけ見える
-      faces.push({i,j,h,c:c&7,f,kk,z0,z1:top});
-    }
+    const [i,j,h]=parse(kk), c=get(kk), bs=ctx.boxes(kk), over=!supported(ctx,kk);
+    // 形の箱ごとに、ほかの箱でふさがれていない面だけを作る（となりのマスの箱、同じマスの中の箱）
+    for(const P of bs) for(const f of FACES){ const a=faceAxis(f); if(faceHidden(ctx,kk,h,P,bs,a,f.n[a])) continue; faces.push({i,j,h,c:c&7,f,kk,P,a,over}); }
   }
   const pos=new Float32Array(faces.length*18), col=new Float32Array(faces.length*18), uv=new Float32Array(faces.length*12);
   let p=0, t=0; const tmp=new THREE.Color();
-  for(const {i,j,h,c,f,kk,z0,z1} of faces){
-    const below=key(i,j,h-1), over = h>0 && !(has(below) && !isHalf(get(below)));
+  for(const {i,j,h,c,f,kk,P,a,over} of faces){
     tmp.set(colorOf(kk, c, over));
     const sh=SHADE[f.n.join(",")];
     // 各頂点の AO: 面の外側のマスから見て、横・縦・斜めの3マスが埋まっているほど暗く
@@ -1579,9 +1685,9 @@ function buildGeometry(keys, has, get, colorOf){
       const A=solid(...s1), B=solid(...s2), C=solid(...s3);
       return (A&&B) ? 0 : 3-(A+B+C);
     });
-    const Z=f.v.map(v=>v[2]?z1:z0);   // 頂点の高さ（ハーフや、となりに隠れた部分を反映）
-    const V=f.v.map((v,n)=>[v[0]+i-OFF, Z[n]+h, v[1]+j-OFF]);
-    const T=f.v.map((v,n)=> f.n[2] ? [v[0],v[1]] : [f.n[0]?v[1]:v[0], Z[n]]);   // 模様の位置。横の面は高さに合わせて切り取る
+    const L=f.v.map(v=>[0,1,2].map(ax=>(v[ax]?P[2*ax+1]:P[2*ax])/U));   // 頂点の位置（マスの中、0〜1）。箱の大きさに合わせる
+    const V=L.map(q=>[q[0]+i-OFF, q[2]+h, q[1]+j-OFF]);
+    const T=L.map(q=> a===2 ? [q[0],q[1]] : a===0 ? [q[1],q[2]] : [q[0],q[2]]);   // 模様の位置。小さい形は、模様もその分だけ切り取る
     // 画面の座標は「高さ」と「奥行き」を入れ替えているので、表から見た頂点の回り順が逆になる → 逆順で三角形を作る。
     // 暗い角が対角線上に筋を作らないよう、明るい方の対角線で四角形を2つに割る。
     const order = (ao[0]+ao[2] >= ao[1]+ao[3]) ? [0,2,1,0,3,2] : [1,3,2,1,0,3];
@@ -1659,7 +1765,7 @@ $("minimap").addEventListener("pointerdown", e => {
 });
 function restoreSolo(){
   try{ const raw=store.get("kousha-solo"); if(!raw) return false; const arr=JSON.parse(raw); if(!arr.length) return false;
-    const m=new Map(); for(const [i,j,k,c] of arr) if(inBounds(i,j,k)&&c>=0&&c<16) m.set(key(i,j,k),c); replaceWorld(m);
+    const m=new Map(); for(const [i,j,k,c] of arr) if(inBounds(i,j,k)&&c>=0&&c<NSHAPES*8) m.set(key(i,j,k),c); replaceWorld(m);
     const st=store.get("kousha-solo-settings"); if(st) S.settings={...S.settings,...JSON.parse(st)}; return true; }catch(_){ return false; }
 }
 
@@ -1694,7 +1800,7 @@ function pan(dx,dy){
 function zoom(f){ cam.dist=Math.min(maxDist,Math.max(GROUND_DIST,cam.dist*f)); updateCamera(); }
 
 // ---- 入力 ----
-let mode="place", color=0, shape=0;   // shape: 0=ブロック、1=下ハーフ
+let mode="place", color=0, kind=0, paneFlip=false;   // kind: 持っている形 0=ブロック 1=下ハーフ 2=縦ハーフ 3=縦1/4。paneFlip: 縦の形の向きを90°回す
 const pointers=new Map(); let dragging=false, downPos=null, downButton=0, lastPinch=0, lastMid=null;
 const ray=new THREE.Raycaster(), ndc=new THREE.Vector2();
 function pick(cx,cy){
@@ -1702,15 +1808,31 @@ function pick(cx,cy){
   const r=canvas.getBoundingClientRect(); ndc.set(((cx-r.left)/r.width)*2-1, -((cy-r.top)/r.height)*2+1); ray.setFromCamera(ndc,camera);
   const hits=ray.intersectObjects([...chunkMeshes.values(), ground]); if(!hits.length) return null;
   const h=hits[0], p=h.point;
-  if(h.object===ground) return {target:[Math.floor(p.x+OFF),Math.floor(p.z+OFF),0], existing:null};
+  if(h.object===ground) return {target:[Math.floor(p.x+OFF),Math.floor(p.z+OFF),0], existing:null, n:[0,0,1]};
   const n=h.face.normal;
-  return {target:[Math.floor(p.x+n.x*0.5+OFF),Math.floor(p.z+n.z*0.5+OFF),Math.floor(p.y+n.y*0.5)], existing:[Math.floor(p.x-n.x*0.5+OFF),Math.floor(p.z-n.z*0.5+OFF),Math.floor(p.y-n.y*0.5)]};
+  // 薄い壁の面はマスの途中にあるので、面から 1/8 マスだけ内側・外側の点で、どのマスかを決める
+  return {target:[Math.floor(p.x+n.x*0.5+OFF),Math.floor(p.z+n.z*0.5+OFF),Math.floor(p.y+n.y*0.5)], existing:[Math.floor(p.x-n.x*0.12+OFF),Math.floor(p.z-n.z*0.12+OFF),Math.floor(p.y-n.y*0.12)],
+          n:[Math.round(n.x),Math.round(n.z),Math.round(n.y)]};
 }
-// 置く場所。ハーフを持っていて、ハーフの上の面を押したときは、そのハーフを「全部ブロック」にする（重ねて1つになる）
+// 縦の形（薄い壁）の向きを決める。0 = 東西（X）にのびる、1 = 南北（Z）にのびる
+//  ・ブロックや壁の「横の面」を押したとき: その面から外へまっすぐのびる向き（壁の続きを作る・T字に枝分かれする）
+//  ・薄い壁の「上の面」を押したとき: 下の壁と同じ向き（上に積み重ねる）
+//  ・それ以外（地面や床の上）: 自分のほうを向く向き（見ている方向と直角）
+//  「向き」ボタン（Rキー）を押すと、決まった向きを90°回す
+function paneAxisFor(hit){
+  const n=hit.n||[0,0,1], e=hit.existing, ev=e && voxels.has(key(...e)) ? voxels.get(key(...e)) : null;
+  let ax;
+  if(n[2]===0) ax = n[0]!==0 ? 0 : 1;
+  else if(ev!==null && isPane(ev)) ax = paneAxis(ev);
+  else { const fwd=new THREE.Vector3(); camera.getWorldDirection(fwd); ax = Math.abs(fwd.x) > Math.abs(fwd.z) ? 1 : 0; }
+  return paneFlip ? 1-ax : ax;
+}
+const kindShape = (k, ax) => k<2 ? k : (k===2 ? 2 : 4) + ax;   // 持っている形と向き → 形の番号
+// 置く場所と、置く値。下ハーフを持っていて、下ハーフの上の面を押したときは、そのハーフを「全部ブロック」にする（重ねて1つになる）
 function placeSpot(hit){
   const e=hit.existing;
-  if(shape && e && hit.target[2]===e[2]+1 && hit.target[0]===e[0] && hit.target[1]===e[1]){ const ek=key(...e); if(voxels.has(ek) && isHalf(voxels.get(ek))) return {cell:e, merge:true}; }
-  return {cell:hit.target, merge:false};
+  if(kind===1 && e && hit.target[2]===e[2]+1 && hit.target[0]===e[0] && hit.target[1]===e[1]){ const ek=key(...e); if(voxels.has(ek) && isHalf(voxels.get(ek))) return {cell:e, merge:true, value:voxels.get(ek)&7}; }
+  return {cell:hit.target, merge:false, value:makeVal(color, kindShape(kind, kind>=2 ? paneAxisFor(hit) : 0))};
 }
 function act(cx,cy,forceErase,forceMode){
   if(exploded){ toast("「分解して見る」の間は編集できません"); return; }
@@ -1727,9 +1849,9 @@ function act(cx,cy,forceErase,forceMode){
   if(cell && !inReach(cell[0],cell[1])){ toast("遠すぎて届きません。「移動」でその場所へ行ってね"); return; }
   if(m==="place"){ const sp=placeSpot(hit), [i,j,k]=sp.cell; if(!inBounds(i,j,k)){ toast("作業台の外には置けません"); return; } const kk=key(i,j,k);
     if(sp.merge){ const b=voxels.get(kk); commit([{k:kk,before:b,after:b&7}]); return; }
-    if(voxels.has(kk)) return; commit([{k:kk,before:null,after:color|(shape?HALF:0)}]); }
+    if(voxels.has(kk)) return; commit([{k:kk,before:null,after:sp.value}]); }
   else if(m==="erase"){ if(!hit.existing) return; const kk=key(...hit.existing); if(!voxels.has(kk)) return; commit([{k:kk,before:voxels.get(kk),after:null}]); }
-  else { if(!hit.existing) return; const kk=key(...hit.existing); if(!voxels.has(kk)) return; const b=voxels.get(kk), a=(b&HALF)|color; if(a===b) return; commit([{k:kk,before:b,after:a}]); }   // 塗るときは形はそのまま
+  else { if(!hit.existing) return; const kk=key(...hit.existing); if(!voxels.has(kk)) return; const b=voxels.get(kk), a=(b&~7)|color; if(a===b) return; commit([{k:kk,before:b,after:a}]); }   // 塗るときは形はそのまま
 }
 function updateGhost(cx,cy){
   const hit=pick(cx,cy);
@@ -1738,9 +1860,10 @@ function updateGhost(cx,cy){
   const cell = hit ? (md==="place"?sp.cell:md==="range"?hit.target:md==="move"?(hit.existing||hit.target):hit.existing) : null;
   if(!cell||!inBounds(...cell)){ ghost.visible=false; return; }
   lastHoverAt = Date.now(); $("coord").textContent = fmtCell(cell);
-  // 置くときの枠: ハーフなら下半分、重ねて1つにするときは上半分
-  const hb = md==="place" && shape ? (sp.merge ? 0.75 : 0.25) : 0.5;
-  ghost.visible=true; ghost.scale.y = hb===0.5 ? 1 : 0.5; ghost.position.set(cell[0]-OFF+0.5,cell[2]+hb,cell[1]-OFF+0.5);
+  // 置くときの枠: 下ハーフなら下半分、重ねて1つにするときは上半分。縦の形は、マスの真ん中に立つ薄い板
+  ghost.visible=true; ghost.scale.set(1,1,1); ghost.position.set(cell[0]-OFF+0.5,cell[2]+0.5,cell[1]-OFF+0.5);
+  if(md==="place" && kind===1){ ghost.scale.y=0.5; ghost.position.y = cell[2] + (sp.merge ? 0.75 : 0.25); }
+  else if(md==="place" && kind>=2){ const t=(kind===2?0.5:0.25)+0.04; if(paneAxis(sp.value)===0) ghost.scale.z=t; else ghost.scale.x=t; }
   // 届かない場所、置くと同じ高さに色が混ざる場所は赤い枠
   const kk=key(...cell), before=voxels.has(kk)?voxels.get(kk):null;
   const mixes = (md==="place" && before===null) || (md==="paint" && before!==null) ? !!levelViolation([{k:kk, before, after:color}]) : false;   // 段の色だけを見るので形は関係ない
@@ -1771,7 +1894,7 @@ canvas.addEventListener("pointerleave",()=>{ if(pointers.size===0) ghost.visible
 canvas.addEventListener("wheel",e=>{ e.preventDefault(); zoom(e.deltaY>0?1.1:0.9); },{passive:false});
 document.addEventListener("keydown",e=>{ if(["INPUT","SELECT","TEXTAREA"].includes(e.target.tagName)||$("scrEditor").hidden||!$("fbOverlay").hidden) return;
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); }
-  if(e.key==="1") setMode("place"); if(e.key==="2") setMode("erase"); if(e.key==="3") setMode("paint"); if(e.key==="4") setMode("range"); if(e.key==="5") setMode("move"); if(e.key.toLowerCase()==="q") setShape(shape?0:1); if(e.key==="0") resetZoom(); });
+  if(e.key==="1") setMode("place"); if(e.key==="2") setMode("erase"); if(e.key==="3") setMode("paint"); if(e.key==="4") setMode("range"); if(e.key==="5") setMode("move"); if(e.key.toLowerCase()==="q") setKind((kind+1)%KIND_COUNT); if(e.key.toLowerCase()==="r") flipPane(); if(e.key==="0") resetZoom(); });
 
 // ---- キーボードで歩く（マインクラフトと同じ）: W 前 / S 後ろ / A 左 / D 右 / スペース 上 / Shift 下 ----
 // 押している間ずっと動く。「前」は今見ている向き（地面に沿って）
@@ -1816,12 +1939,19 @@ function setMode(m){ mode=m; for(const [k,id] of Object.entries(modeBtns)) $(id)
   $("rangeBox").hidden = m!=="range"; rangeBox3.visible = m==="range" && !!rangeBounds(); if(m==="range") updateRangePreview(); }
 for(const [k,id] of Object.entries(modeBtns)) $(id).addEventListener("click",()=>{ setMode(k); showHint(3500); });   // 道具を変えたら、その使い方を少しだけ見せる
 setMode("place");
-// 形の切りかえ（ブロック ⇔ 下ハーフ）。1つのボタンを押すたびに入れかわる
-function setShape(s){ shape=s; const b=$("btnShape"); b.setAttribute("aria-pressed",String(!!s)); b.querySelector("span").textContent = s ? "ハーフ" : "ブロック";
-  b.querySelector(".full").style.display = s ? "none" : ""; b.querySelector(".half").style.display = s ? "" : "none";
+// 形の切りかえ（ブロック → 下ハーフ → 縦ハーフ → ブロック…）。1つのボタンを押すたびに次の形へ
+// 縦1/4 は、1ブロックを小さくすると薄すぎて印刷できないことがあるため、今は選べないようにしている。
+// KIND_COUNT を 4 にすると選べるようになる（表示・保存・STL・データベースは縦1/4にも対応済み）
+const KIND_LABELS = ["ブロック","下ハーフ","縦ハーフ","縦1/4"], KIND_COUNT = 3;
+function setKind(k){ kind=k; const b=$("btnShape"); b.setAttribute("aria-pressed",String(k>0)); b.querySelector("span").textContent = KIND_LABELS[k];
+  for(let n=0;n<4;n++) b.querySelector(".k"+n).style.display = n===k ? "" : "none";
+  $("btnRotate").hidden = k<2;
+  if(k>=2 && !store.get("kousha-pane-tip")){ store.set("kousha-pane-tip","1"); toast("薄い壁はマスの真ん中に立ち、となりの壁と自動でつながります。向きは「向き」ボタン（Rキー）で回せます"); }
   if(mode==="range") updateRangePreview(); }
-$("btnShape").addEventListener("click",()=>setShape(shape?0:1));
-setShape(0);
+function flipPane(){ if(kind<2) return; paneFlip=!paneFlip; $("btnRotate").setAttribute("aria-pressed",String(paneFlip)); toast(paneFlip ? "向きを90°回しました（もう一度押すと元に戻ります）" : "向きを元に戻しました"); if(mode==="range") updateRangePreview(); }
+$("btnShape").addEventListener("click",()=>setKind((kind+1)%KIND_COUNT));
+$("btnRotate").addEventListener("click",flipPane);
+setKind(0);
 const sw=$("swatches");
 function selectColor(idx){ color=idx; [...sw.children].forEach((x,i)=>x.setAttribute("aria-pressed",String(i===idx))); if(mode==="range") updateRangePreview(); }
 PALETTE.forEach((c,idx)=>{ const b=document.createElement("button"); b.className="swatch"; b.style.background=c.hex; b.setAttribute("aria-label",c.name); b.innerHTML=`<span>${c.name}</span>`; b.addEventListener("click",()=>selectColor(idx)); sw.appendChild(b); });
@@ -1834,7 +1964,7 @@ function updateStats(){
   let min=[Infinity,Infinity,Infinity], max=[-Infinity,-Infinity,-Infinity];
   for(const k of voxels.keys()){ const p=parse(k); for(let a=0;a<3;a++){ if(p[a]<min[a])min[a]=p[a]; if(p[a]>max[a])max[a]=p[a]; } }
   const dims=n?[max[0]-min[0]+1,max[1]-min[1]+1,max[2]-min[2]+1]:[0,0,0];
-  const fill=$("fillExport").checked, src=fill?filledVoxels(voxels):voxels, vol=[...src.values()].reduce((a,c)=>a+(isHalf(c)?0.5:1),0)*Math.pow(mm/10,3);
+  const fill=$("fillExport").checked, src=fill?filledVoxels(voxels):voxels, vol=mapVolume(src)*Math.pow(mm/10,3);
   $("sCount").textContent=n.toLocaleString("ja-JP");
   $("sDims").innerHTML=n?`${dims[0]} × ${dims[1]} × ${dims[2]} <small>ブロック</small>`:"—";
   $("sMm").innerHTML=n?`${fmt(dims[0]*mm)} × ${fmt(dims[1]*mm)} × ${fmt(dims[2]*mm)} <small>mm</small>`:"—";
@@ -1853,6 +1983,12 @@ function updateStats(){
   const mx = mixedLevels(), on=$("oneColorNote");
   on.hidden = !(S.settings.oneColor && mx.length);
   on.textContent = mx.length ? `今、Y=${mx.join("、")} に色が混ざっています。「範囲」でその高さ全体を囲んで1色に塗ると直せます（消すことはいつでもできます）。` : "";
+  // 薄い壁の厚さ（ノズル0.4mmなら0.8mm以上が目安）
+  const tw=thinWalls(voxels, mm), tf=$("thinFlag");
+  tf.hidden = !(tw.quarter||tw.half); tf.classList.toggle("bad", !!tw.bad);
+  $("thinCount").textContent = (tw.quarter+tw.half).toLocaleString("ja-JP");
+  tf.lastElementChild.textContent = `個の薄い壁（${[tw.half?`縦ハーフ ${fmt2(tw.hmm)}mm`:"", tw.quarter?`縦1/4 ${fmt2(tw.qmm)}mm`:""].filter(Boolean).join("・")}の厚さ）。`
+    + (tw.bad ? `${MIN_WALL_MM}mmより薄いと、プリンターでうまく作れません。「1ブロック = ○mm」を大きくしてください${tw.quarter?"（縦1/4は縦ハーフにすると厚くなります）":""}` : "印刷できる厚さです。高く積むと折れやすいので、ところどころにブロックの柱を入れると丈夫になります");
   const sf=$("swapFlag"); $("swapCount").textContent=swaps.toLocaleString("ja-JP"); sf.classList.toggle("bad",mixed.length>0);
   sf.lastElementChild.textContent=swaps===0?"色の交換はありません":mixed.length?`回の色交換 ≈ +${fmt(swaps*1.5)}分。${mixed.length}段で色が混ざっています`:`回だけ（段の境目）≈ +${fmt(swaps*1.5)}分`;
   $("swapNote").textContent=mixed.length?`混ざっている段: 下から ${mixed.join("、")} 段目。段ごとに1色にすると交換が激減します。`:"";
@@ -1895,7 +2031,7 @@ $("btnStl").addEventListener("click",()=>{
   const mm=S.settings.mm, src=$("fillExport").checked?filledVoxels(voxels):voxels;
   if(!$("splitExport").checked){ download(`${safeName()}.stl`,buildSTL(src,mm)); toast("STLを書き出しました"); return; }
   const byColor=new Map(); for(const [k,c] of src){ const cc=c&7; if(!byColor.has(cc)) byColor.set(cc,new Map()); byColor.get(cc).set(k,c); }
-  const entries=[...byColor].sort((a,b)=>a[0]-b[0]).map(([c,m])=>({name:`${safeName()}_${String(c+1).padStart(2,"0")}_${PALETTE[c].name}.stl`,data:buildSTL(m,mm)}));
+  const entries=[...byColor].sort((a,b)=>a[0]-b[0]).map(([c,m])=>({name:`${safeName()}_${String(c+1).padStart(2,"0")}_${PALETTE[c].name}.stl`,data:buildSTL(m,mm,src)}));   // 薄い壁のつながりは全体を見て決める
   download(`${safeName()}_colors.zip`,makeZip(entries)); toast(`${entries.length}色分のSTLをzipにしました`);
 });
 // ============================================================
@@ -1917,22 +2053,22 @@ function partSource(){   // 書き出しの対象（全体、または「範囲�
 }
 // 切る高さの提案: 「真下が空いているブロック」がその段にまとまってある（＝床・天井・屋根の板がある）高さ
 function suggestCuts(src){
-  const over = new Map(), total = new Map();
-  for(const k of src.keys()){ const [i,j,h] = parse(k); total.set(h,(total.get(h)||0)+1); if(h>0 && !fullAt(src,key(i,j,h-1))) over.set(h,(over.get(h)||0)+1); }
+  const over = new Map(), total = new Map(), ctx = mapCtx(src);
+  for(const k of src.keys()){ const h = parse(k)[2]; total.set(h,(total.get(h)||0)+1); if(!supported(ctx,k)) over.set(h,(over.get(h)||0)+1); }
   const hs = [...over].filter(([h,c]) => c>=6 && c>=0.3*(total.get(h)||1)).map(([h])=>h).sort((a,b)=>a-b);
   return hs.filter((h,idx) => idx===0 || h-1!==hs[idx-1]);   // 段々の屋根などで続いている高さは、一番下だけにする
 }
 // 1つのパーツの検査: 浮いているブロックと、支えから遠すぎる張り出し
 function analyzePart(map, lo){
-  const seen = new Set(), st = [];
+  const seen = new Set(), st = [], ctx = mapCtx(map);
   for(const k of map.keys()) if(parse(k)[2]===lo){ seen.add(k); st.push(k); }
-  while(st.length){ const k0 = st.pop(), [i,j,h] = parse(k0); for(const f of FACES){ const nk = key(i+f.n[0], j+f.n[1], h+f.n[2]); if(map.has(nk) && !seen.has(nk) && touches(map,k0,nk,f.n[2])){ seen.add(nk); st.push(nk); } } }
+  while(st.length){ const k0 = st.pop(), [i,j,h] = parse(k0); for(const f of FACES){ const nk = key(i+f.n[0], j+f.n[1], h+f.n[2]), a = faceAxis(f); if(map.has(nk) && !seen.has(nk) && cellsTouch(ctx,k0,a,f.n[a])){ seen.add(nk); st.push(nk); } } }
   const floatingK = new Set([...map.keys()].filter(k => !seen.has(k)));
   const byLevel = new Map(); for(const k of map.keys()){ const h = parse(k)[2]; if(h===lo) continue; if(!byLevel.has(h)) byLevel.set(h,[]); byLevel.get(h).push(k); }
   const longOver = new Set();
   for(const [h,ks] of byLevel){
     const dist = new Map(), q = [];
-    for(const k of ks){ const [i,j] = parse(k); if(fullAt(map,key(i,j,h-1))){ dist.set(k,0); q.push(k); } }
+    for(const k of ks){ if(supported(ctx,k)){ dist.set(k,0); q.push(k); } }
     for(let qi=0; qi<q.length; qi++){
       const k = q[qi], d = dist.get(k); if(d>=BRIDGE) continue; const [i,j] = parse(k);
       for(const [di,dj] of [[1,0],[-1,0],[0,1],[0,-1]]){ const nk = key(i+di,j+dj,h); if(map.has(nk) && !dist.has(nk)){ dist.set(nk,d+1); q.push(nk); } }
@@ -1975,7 +2111,7 @@ function refreshParts(){
   if(!parts.length){ list.innerHTML = '<p class="small">書き出すブロックがありません。</p>'; $("btnPartsStl").disabled = true; updateExplode(); return; }
   $("btnPartsStl").disabled = false;
   for(const p of parts){
-    const sx = p.size[0]*mm, sz = p.size[1]*mm, sy = p.size[2]*mm, g = p.map.size*Math.pow(mm/10,3)*1.24;
+    const sx = p.size[0]*mm, sz = p.size[1]*mm, sy = p.size[2]*mm, g = mapVolume(p.map)*Math.pow(mm/10,3)*1.24;
     const issues = [];
     if(p.floating.size) issues.push(`浮き ${p.floating.size}個`);
     if(p.longOver.size) issues.push(`長い張り出し ${p.longOver.size}個`);
@@ -2023,7 +2159,7 @@ $("btnSave").addEventListener("click",()=>{ download(`${safeName()}.json`,JSON.s
 $("btnLoad").addEventListener("click",()=>$("fileIn").click());
 $("fileIn").addEventListener("change",async e=>{ const f=e.target.files[0]; if(!f) return;
   try{ const d=JSON.parse(await f.text()); if(!Array.isArray(d.blocks)) throw 0;
-    const m=new Map(); for(const b of d.blocks){ const [i,j,k,c]=b.map(Number); if(inBounds(i,j,k)&&c>=0&&c<16) m.set(key(i,j,k),c); }
+    const m=new Map(); for(const b of d.blocks){ const [i,j,k,c]=b.map(Number); if(inBounds(i,j,k)&&c>=0&&c<NSHAPES*8) m.set(key(i,j,k),c); }
     await bulkReplace(m); toast(`${m.size}個のブロックを読み込みました`); }catch(_){ toast("このファイルは読み込めませんでした"); } e.target.value=""; });
 $("btnUndo").addEventListener("click",undo);
 let clearArmed=false;
